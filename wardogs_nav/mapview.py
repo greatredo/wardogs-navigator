@@ -199,7 +199,6 @@ class MapView(QGraphicsView):
         pen.setJoinStyle(Qt.RoundJoin)
         if dashed:
             pen.setStyle(Qt.DashLine)
-            pen.setDashPattern([16/width,12/width])
         item = self.scene().addPath(path,pen)
         item.setZValue(z)
 
@@ -225,7 +224,7 @@ class MapView(QGraphicsView):
         if self.show_roads:
             for road in self.project['roads']:
                 selected = road['id'] == self.selected_road
-                self.line(road['points'], '#ffffff' if selected else COLORS[road['kind']], 4 if selected else 2)
+                self.line(road['points'], '#ffffff' if selected else COLORS[road['kind']], 4 if selected else 2, dashed=True)
                 if selected:
                     for i,p in enumerate(road['points']):
                         self.handle(p,'#f2cf75',('road',road['id'],i))
@@ -241,8 +240,8 @@ class MapView(QGraphicsView):
             self.handle(zone['point'],'#e47878',('avoid',i))
             self.label('避让',zone['point'],'#ffb0b0')
         if self.route:
-            self.line(self.route.points,'#102d2b',9,dashed=True,z=8)
-            self.line(self.route.points,'#59e1bf',5,dashed=True,z=9)
+            self.line(self.route.points,'#102d2b',9,z=8)
+            self.line(self.route.points,'#59e1bf',5,z=9)
             # Visual direction along the route.
             for i in range(0,len(self.route.points)-1,5):
                 a,b=self.route.points[i:i+2]

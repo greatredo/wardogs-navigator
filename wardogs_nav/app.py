@@ -191,7 +191,7 @@ class MainWindow(QMainWindow):
         self.map.road_edit_requested.connect(self.edit_road_on_map)
         self.map.road_delete_requested.connect(self.delete_road_on_map)
         self.map.hover.connect(lambda x,y:self.coordinate_label.setText(f'地图坐标  {x:.0f}, {y:.0f}'))
-        bottom=QHBoxLayout();legend=self.text('● 大路   ● 小路   ● 野地   ┄┄ 导航路线',True);legend.setWordWrap(False);bottom.addWidget(legend);bottom.addStretch()
+        bottom=QHBoxLayout();legend=self.text('┄ 大路   ┄ 小路   ┄ 野地   ━ 导航路线',True);legend.setWordWrap(False);bottom.addWidget(legend);bottom.addStretch()
         self.coordinate_label=self.text('地图坐标 —',True);bottom.addWidget(self.coordinate_label);right_layout.addLayout(bottom)
         splitter.addWidget(right);splitter.setSizes([390,1050]);splitter.setStretchFactor(1,1)
         self.build_navigation();self.build_editor();self.build_library();self.build_settings()
@@ -1027,7 +1027,7 @@ class MainWindow(QMainWindow):
             '7. 收藏可勾选“贴合现有道路”，粗略放点后预览沿路路径。关闭时保留完整走法并选择是否建立道路。导入同样确认选项；不建路也可导航，仅该收藏使用。导出保留完整路径、类型、粗绘点、选项与路书，可反向载入。收藏仍遵守危险区与道路规则。\n'
             '8. 常规提示路口动作和沿路距离；WRC 提示弯级、直角和手动急刹车等，显示后续三条路书。两种模式提前量独立调整，可在导航页查看播报列表。\n\n'
             '9. OZETI、BAKURANI、ZESTAFONA 分别保存道路、收藏、危险区、路书和比例尺。切图会保存当前配置并停止导航；重新开启定位后继续。完整配置导入会切至对应地图，路网和收藏资料库需先切到同一地图再合并。\n\n'
-            '道路按分类直接参与规划，无需设置确认状态；导航路线显示为虚线。途经点和危险区可分别一键清空，并可撤销。路线端点吸附到道路，不包含未知地形的末段引导。图片无法识别地雷、实时路障或证明越野可通行。\n'
+            '道路按分类直接参与规划，无需设置确认状态；地图道路统一用虚线，导航路线保持实线。途经点和危险区可分别一键清空，并可撤销。路线端点吸附到道路，不包含未知地形的末段引导。图片无法识别地雷、实时路障或证明越野可通行。\n'
             '仅获取指定屏幕区域，不读取游戏内存或自动控制载具。第三方工具许可仍以游戏方规定为准。\n\n'
             f'配置自动保存在：{user_dir()}\n导出 JSON 可备份或共享完整地图配置。')
 
