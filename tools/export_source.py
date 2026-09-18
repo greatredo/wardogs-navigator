@@ -20,6 +20,13 @@ def public_files():
     paths=[*(Path(p) for p in TOP),*(Path('tools')/p for p in TOOLS),*(Path('assets')/p for p in ASSETS)]
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_nav').glob('*.py'))
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'tests').glob('test_*.py'))
+    # Community submissions are reviewed data and documentation, not executables.
+    community=ROOT/'community'
+    if community.is_dir():
+        allowed={'.md','.json','.png','.jpg','.jpeg','.webp'}
+        paths.extend(p.relative_to(ROOT) for p in community.rglob('*')
+                     if p.is_file() and not p.is_symlink() and p.suffix.lower() in allowed
+                     and not any(part.startswith('.') for part in p.relative_to(community).parts))
     return sorted(set(paths),key=lambda p:p.as_posix())
 
 

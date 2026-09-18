@@ -96,6 +96,12 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 运行 `python tools/export_source.py` 可在 `dist/open-source/` 生成可单独运行、测试和构建的源码副本及源码 ZIP。输出目录已存在时需用 `--output dist/新目录/WardogsNavigator` 选择新目录，工具不会覆盖已有仓库。
 
+## 玩家配置分享
+
+在 [社区配置库](community/README.md) 按地图查找和分享路网、路线收藏、拉力赛路书与完整地图配置。每份配置保留作者、适用版本、实测说明和导入方式；玩家通过 PR 提交，维护者审核后收录。
+
+路网和收藏使用对应按钮合并导入，完整配置会替换目标地图的当前内容，导入前先备份。下载与投稿步骤见社区说明。便携包用户可以直接访问 [GitHub 社区配置库](https://github.com/greatredo/wardogs-navigator/tree/main/community)。社区配置独立于程序发行版更新，由用户选择下载和导入。
+
 ## 许可证与署名
 
 原创代码及文档按 Apache License 2.0 提供，参见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。第三方软件保持原许可证；地图图像、游戏画面及商标不因本项目开源而成为 Apache-2.0 素材。地图来源、修改方式及依赖许可证列于 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 [assets/README.md](assets/README.md)。
