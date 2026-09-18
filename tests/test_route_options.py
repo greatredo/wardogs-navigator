@@ -56,7 +56,7 @@ def test_import_no_roads_keeps_private_navigation_reverse_and_hard_constraints(t
     assert merged==before
     with pytest.raises(RouteError):plan(merged['roads'],[[100,100],[200,200]],POLICY['allowed'])
     with pytest.raises(RouteError,match='未允许'):follow_saved(merged['roads'],entry,dict(allowed=['minor'],confirmed_only=False))
-    with pytest.raises(RouteError,match='未实测'):follow_saved(merged['roads'],entry,dict(allowed=POLICY['allowed'],confirmed_only=True))
+    assert follow_saved(merged['roads'],entry,dict(allowed=POLICY['allowed'],confirmed_only=True)).length==pytest.approx(200)
     with pytest.raises(RouteError,match='绕行道路'):follow_saved(merged['roads'],entry,POLICY,[dict(shape='rect',point=[100,150],width=20,height=20)])
     path=tmp_path/'仅收藏路线.json';atomic_json(path,library_payload(merged,'routes'))
     restored,_,added=merge_library(data(),read_project(path),'routes')

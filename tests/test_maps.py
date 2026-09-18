@@ -124,7 +124,7 @@ def test_new_map_assets_match_their_coordinate_frame(mid):
     meta=json.loads(map_asset(mid,'source').read_text(encoding='utf-8'))
     p=read_project(map_asset(mid,'project'))
     assert p['meters_per_pixel']==pytest.approx(2/meta['reference_to_map'][0][0])
-    assert len(p['roads'])>=100 and all(not r['confirmed'] for r in p['roads'])
+    assert len(p['roads'])>=100 and all(r['confirmed'] for r in p['roads'])
     locator=Locator.from_assets(mid)
     crop=read_image(map_asset(mid,'source').parent/'reference-crop.png')
     for image in (crop,cv2.resize(crop,None,fx=1.25,fy=1.25)):

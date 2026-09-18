@@ -82,7 +82,7 @@ def supplement_roads(roads, saved):
             simple.append(run[-1])
             for i in range(0,len(simple)-1,1999):
                 road=dict(id=uid(),name=f"收藏补路 · {saved['name']}",kind=run_kind,
-                          confirmed=False,points=simple[i:i+2000],note='由完整收藏路径补入；待游戏内实测')
+                          confirmed=True,points=simple[i:i+2000],note='由完整收藏路径补入')
                 additions.append(road);index.add(road)
         run=[];run_kind=None
     previous_covered=False
@@ -141,10 +141,10 @@ def follow_saved(roads, saved, policy, avoid=(), start=None, reverse=False, mini
         road=index.covering(a,b,kind)
         if road is None:raise RouteError('收藏路径有缺路，请重新载入收藏以补路')
         if not usable(road,policy['allowed'],policy['confirmed_only']):
-            raise RouteError(f"收藏经过未允许的路段：{KINDS[road['kind']]} / {'已实测' if road['confirmed'] else '未实测'}。请调整规则或编辑收藏")
+            raise RouteError(f"收藏经过未允许的路段：{KINDS[road['kind']]}。请调整规则或编辑收藏")
         owners.append(road)
     route=Route(points,[r['kind'] for r in owners],[r['id'] for r in owners],
-                cumulative(points)[-1],[0,0],len({r['id'] for r in owners if not r['confirmed']}))
+                cumulative(points)[-1],[0,0],0)
     nodes,adj,_,_=build_graph(roads,[points[0],points[-1]],set(KINDS),max_snap=2.)
     route.junctions=junctions_on_route(nodes,adj,route)
     # Join the closest *remaining* part of the saved path. Never shortcut its rest.
@@ -189,8 +189,7 @@ def follow_saved(roads, saved, policy, avoid=(), start=None, reverse=False, mini
     route.junctions=junctions_on_route(nodes,adj,route)
     if any(blocked(a,b,z) for a,b in zip(route.points,route.points[1:]) for z in avoid):
         raise RouteError('收藏路径仍与危险区相交，请调整危险区或补画绕行道路')
-    used=set(route.road_ids)
-    route.unconfirmed=sum(1 for r in roads if r['id'] in used and not r['confirmed'])
+    route.unconfirmed=0
     return route
 
 

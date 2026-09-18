@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="600" viewBox="0 0 1080 600">
+<style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC","Segoe UI",sans-serif}</style>
+<rect x="0" y="0" width="1080" height="600" rx="0" fill="#eef2f6" stroke="none"/>
+<rect x="0" y="0" width="1080" height="124" rx="0" fill="#152a3a" stroke="none"/>
+<rect x="30" y="28" width="54" height="54" rx="14" fill="#6ce0b6" stroke="none"/>
+<text x="57" y="65" font-size="28" fill="#152a3a" text-anchor="middle" font-weight="700">04</text>
+<text x="105" y="56" font-size="28" fill="#ffffff" text-anchor="start" font-weight="700">为这一次投稿建立分支</text>
+<text x="105" y="93" font-size="18" fill="#c1d4df" text-anchor="start" font-weight="400">自己的副本 → 先选 main → 输入新分支名称</text>
+<rect x="30" y="146" width="1020" height="390" rx="12" fill="#ffffff" stroke="#d6dfe8"/>
+<text x="32" y="575" font-size="17" fill="#526577" text-anchor="start" font-weight="400">操作示意图 · 并非实时网页截图 · 按钮以 GitHub 实际页面为准</text>
+<text x="58" y="197" font-size="24" fill="#203747" text-anchor="start" font-weight="700">你的用户名 / wardogs-navigator</text>
+<rect x="58" y="220" width="180" height="46" rx="7" fill="#f6f8fa" stroke="#bdcad5"/>
+<text x="148.0" y="250" font-size="19" fill="#203747" text-anchor="middle" font-weight="600">main  ▾</text>
+<rect x="58" y="281" width="620" height="144" rx="9" fill="#f6f8fa" stroke="#bdcad5"/>
+<rect x="78" y="299" width="580" height="45" rx="5" fill="#ffffff" stroke="#83aece"/>
+<text x="91" y="329" font-size="22" fill="#203747" text-anchor="start" font-weight="400">share-ozeti-my-roads</text>
+<text x="79" y="381" font-size="21" fill="#126346" text-anchor="start" font-weight="600">Create branch: share-ozeti-my-roads</text>
+<text x="79" y="411" font-size="18" fill="#526577" text-anchor="start" font-weight="400">from main</text>
+<text x="710" y="318" font-size="20" fill="#203747" text-anchor="start" font-weight="400">① 输入一个新名字</text>
+<text x="710" y="360" font-size="20" fill="#203747" text-anchor="start" font-weight="400">② 点击下面的创建结果</text>
+<rect x="58" y="443" width="964" height="77" rx="8" fill="#e8f7f0" stroke="none"/>
+<text x="78" y="472" font-size="21" fill="#126346" text-anchor="start" font-weight="700">看到分支框变为 share-ozeti-my-roads，即创建成功</text>
+<text x="78" y="502" font-size="18" fill="#325849" text-anchor="start" font-weight="400">本次投稿的 README 和 JSON 都保存到这个分支。</text>
+</svg>

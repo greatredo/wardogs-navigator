@@ -100,7 +100,7 @@ def test_draw_road_using_map_and_property_dialog(window,app,kind):
     assert len(window.map.draft)==3
     window.undo_draw_point();assert len(window.map.draft)==2
     def accept_road():
-        dialog=app.activeModalWidget();dialog.name.setText('手绘测试道路');dialog.confirmed.setChecked(True);dialog.accept()
+        dialog=app.activeModalWidget();dialog.name.setText('手绘测试道路');dialog.accept()
     QTimer.singleShot(0,accept_road);window.finish_road();app.processEvents()
     assert len(window.project['roads'])==count+1
     assert window.project['roads'][-1]['kind']==kind and window.project['roads'][-1]['confirmed']
@@ -118,7 +118,7 @@ def test_draw_favorite_export_import_and_load(window,app,tmp_path,monkeypatch):
     QTimer.singleShot(0,accept_name);window.finish_road();app.processEvents()
     saved=window.project['route_library'][0]
     assert saved['name']=='跨野地补给' and saved['kinds']==['major','offroad']
-    assert len(window.project['roads'])==2 and all(not r['confirmed'] for r in window.project['roads'])
+    assert len(window.project['roads'])==2 and all(r['confirmed'] for r in window.project['roads'])
     path=tmp_path/'路线收藏.json'
     monkeypatch.setattr(QFileDialog,'getSaveFileName',lambda *a,**k:(str(path),''))
     window.export_library('routes');assert read_project(path)['route_library']==[saved]

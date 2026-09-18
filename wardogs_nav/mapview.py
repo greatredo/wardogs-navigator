@@ -224,7 +224,7 @@ class MapView(QGraphicsView):
         if self.show_roads:
             for road in self.project['roads']:
                 selected = road['id'] == self.selected_road
-                self.line(road['points'], '#ffffff' if selected else COLORS[road['kind']], 4 if selected else 2, not road['confirmed'])
+                self.line(road['points'], '#ffffff' if selected else COLORS[road['kind']], 4 if selected else 2, dashed=True)
                 if selected:
                     for i,p in enumerate(road['points']):
                         self.handle(p,'#f2cf75',('road',road['id'],i))

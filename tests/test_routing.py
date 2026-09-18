@@ -17,7 +17,8 @@ def test_road_filters_are_hard_constraints(roads):
     direct=plan(roads,[[0,0],[100,0]],['major']);assert direct.length==100
     minor=plan(roads,[[0,0],[100,0]],['minor']);assert minor.length==200
     field=plan(roads,[[0,0],[100,0]],['offroad']);assert set(field.kinds)=={'offroad'}
-    with pytest.raises(RouteError):plan(roads,[[0,0],[100,0]],['offroad'],True)
+    legacy=plan(roads,[[0,0],[100,0]],['offroad'],True)
+    assert legacy.points==field.points and legacy.unconfirmed==0
 
 
 @pytest.mark.parametrize('zone',[{'point':[50,0],'radius':10},{'shape':'rect','point':[50,0],'width':20,'height':20}])

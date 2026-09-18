@@ -106,7 +106,7 @@ class MainWindow(QMainWindow):
         self.minimap_overlay.mask_changed.connect(lambda mask:setattr(self.worker,'path_mask',mask))
         self.hud.changed.connect(self.save_settings)
         self.build_ui()
-        self.setWindowTitle('WARDOGS Navigator 0.5 · '+map_info(self.project['map'])['name'])
+        self.setWindowTitle('WARDOGS Navigator 0.5.1 · '+map_info(self.project['map'])['name'])
         self.setWindowFlag(Qt.WindowStaysOnTopHint,self.settings['main_topmost'])
         self.refresh_lists()
         self.refresh_map()
@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(700,self.load_voices)
         if start_worker:self.worker.start()
         QTimer.singleShot(0,self.map.fit)
-        if self.load_error:QTimer.singleShot(300,lambda:self.notify('上次配置读取失败，已载入默认候选；原文件保留。'+self.load_error))
+        if self.load_error:QTimer.singleShot(300,lambda:self.notify('上次配置读取失败，已载入内置路网；原文件保留。'+self.load_error))
         elif changed:QTimer.singleShot(300,lambda:self.notify('已升级干净底图与道路数据；目的地、危险区及自定义内容已保留，旧配置已备份。'))
         elif self.project['map']=='ozeti' and self.project.get('road_data_revision',1)<2:QTimer.singleShot(300,lambda:self.notify('已保留你编辑过的道路；可在“地图标注”中载入新版道路数据。'))
         QShortcut(QKeySequence('Ctrl+Z'),self,self.undo)
@@ -147,6 +147,7 @@ class MainWindow(QMainWindow):
         scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(widget);self.tabs.addTab(scroll,title);return layout
 
     def build_ui(self):
+        self.clear_waypoint_buttons=[];self.clear_avoid_buttons=[]
         central=QWidget();self.setCentralWidget(central);outer=QVBoxLayout(central);outer.setContentsMargins(18,14,18,10);outer.setSpacing(12)
         header=QHBoxLayout();title=QLabel('WARDOGS');title.setObjectName('title');header.addWidget(title)
         header.addWidget(self.text('地面载具导航',True))
@@ -161,9 +162,12 @@ class MainWindow(QMainWindow):
         splitter=QSplitter();outer.addWidget(splitter,1)
         self.tabs=QTabWidget();self.tabs.setMinimumWidth(350);self.tabs.setMaximumWidth(475);splitter.addWidget(self.tabs)
         right=QWidget();right_layout=QVBoxLayout(right);right_layout.setContentsMargins(8,0,0,0)
-        toolbar=QHBoxLayout()
+        toolbar_box=QWidget();toolbar_box.setStyleSheet('QPushButton { padding:7px 4px; }')
+        toolbar=QHBoxLayout(toolbar_box);toolbar.setContentsMargins(0,0,0,0)
         for label,tool in [('移动 / 选路','pan'),('目的地','destination'),('危险区','avoid'),('途经点','waypoint'),('绘制道路','road')]:toolbar.addWidget(self.button(label,lambda _,t=tool:self.set_tool(t)))
-        toolbar.addStretch();toolbar.addWidget(self.button('适应地图',lambda:self.map.fit()));right_layout.addLayout(toolbar)
+        toolbar.addWidget(self.clear_button('waypoints','toolbar'))
+        toolbar.addWidget(self.clear_button('avoid','toolbar'))
+        toolbar.addStretch();toolbar.addWidget(self.button('适应地图',lambda:self.map.fit()));right_layout.addWidget(toolbar_box)
         self.draw_kind=QComboBox()
         for key,label in KINDS.items():self.draw_kind.addItem(label,key)
         self.draw_kind.setCurrentIndex(1)
@@ -187,7 +191,7 @@ class MainWindow(QMainWindow):
         self.map.road_edit_requested.connect(self.edit_road_on_map)
         self.map.road_delete_requested.connect(self.delete_road_on_map)
         self.map.hover.connect(lambda x,y:self.coordinate_label.setText(f'地图坐标  {x:.0f}, {y:.0f}'))
-        bottom=QHBoxLayout();bottom.addWidget(self.text('● 大路   ● 小路   ● 野地   ··· 待实测   ━ 导航路线',True));bottom.addStretch()
+        bottom=QHBoxLayout();legend=self.text('┄ 大路   ┄ 小路   ┄ 野地   ━ 导航路线',True);legend.setWordWrap(False);bottom.addWidget(legend);bottom.addStretch()
         self.coordinate_label=self.text('地图坐标 —',True);bottom.addWidget(self.coordinate_label);right_layout.addLayout(bottom)
         splitter.addWidget(right);splitter.setSizes([390,1050]);splitter.setStretchFactor(1,1)
         self.build_navigation();self.build_editor();self.build_library();self.build_settings()
@@ -203,18 +207,17 @@ class MainWindow(QMainWindow):
         self.start_button=self.button('开始导航',self.start_navigation,True);status.addWidget(self.start_button)
         status.addWidget(self.row(self.button('停止',self.stop_navigation),self.button('显示图标',self.show_hud),self.button('隐藏图标',self.hud.hide)))
         target=self.group('目的地与途经点',layout)
+        target.addWidget(self.row(self.clear_button('waypoints','navigation'),self.clear_button('avoid','navigation')))
         self.destination_label=self.text('在地图点选目的地');target.addWidget(self.destination_label)
         self.saved_dest=QComboBox();self.saved_dest.currentIndexChanged.connect(self.choose_destination);target.addWidget(self.saved_dest)
         target.addWidget(self.row(self.button('地图选点',lambda:self.set_tool('destination')),self.button('收藏目的地',self.save_destination)))
         self.waypoint_list=QListWidget();self.waypoint_list.setMaximumHeight(90);target.addWidget(self.waypoint_list)
-        target.addWidget(self.row(self.button('添加途经点',lambda:self.set_tool('waypoint')),self.button('删除选中',self.delete_waypoint)))
-        target.addWidget(self.button('框选危险区域并绕行',lambda:self.set_tool('avoid')))
+        target.addWidget(self.row(self.button('添加途经点',lambda:self.set_tool('waypoint')),self.button('删除选中',self.delete_waypoint),self.button('框选危险区',lambda:self.set_tool('avoid'))))
         target.addWidget(self.text('拖框标记危险区域即可绕行；绿点用于指定必经位置。右键可删除标注。',True))
         self.roundtrip=QCheckBox('连续往返（到达后自动切换去程 / 返程）');self.roundtrip.setChecked(self.project['roundtrip']);self.roundtrip.toggled.connect(self.change_policy);target.addWidget(self.roundtrip)
         rules=self.group('路线规则',layout);self.kind_checks={}
         for key,label in KINDS.items():
             check=QCheckBox('允许'+label);check.setChecked(key in self.project['policy']['allowed']);check.toggled.connect(self.change_policy);self.kind_checks[key]=check;rules.addWidget(check)
-        self.confirmed=QCheckBox('只使用已实测路段');self.confirmed.setChecked(self.project['policy']['confirmed_only']);self.confirmed.toggled.connect(self.change_policy);rules.addWidget(self.confirmed)
         rules.addWidget(self.text('野地/越野默认关闭；地图无法判断地雷或实时障碍。',True))
         controls=self.group('导航与播报',layout)
         self.mode=QComboBox();self.mode.addItem('常规导航','normal');self.mode.addItem('WRC 路书','wrc');self.mode.setCurrentIndex(self.mode.findData(self.settings['mode']));self.mode.currentIndexChanged.connect(self.change_mode);controls.addWidget(self.mode)
@@ -226,12 +229,12 @@ class MainWindow(QMainWindow):
     def build_editor(self):
         layout=self.page('地图标注')
         roads=self.group('道路',layout)
-        self.roads_visible=QCheckBox('显示候选道路');self.roads_visible.setChecked(True);self.roads_visible.toggled.connect(self.toggle_roads);roads.addWidget(self.roads_visible)
+        self.roads_visible=QCheckBox('显示道路');self.roads_visible.setChecked(True);self.roads_visible.toggled.connect(self.toggle_roads);roads.addWidget(self.roads_visible)
         self.road_list=QListWidget();self.road_list.setMinimumHeight(180);self.road_list.currentRowChanged.connect(self.select_road);self.road_list.itemDoubleClicked.connect(lambda _:self.edit_road());roads.addWidget(self.road_list)
         roads.addWidget(self.row(self.button('绘制道路',lambda:self.set_tool('road')),self.button('完成绘制',self.finish_road)))
         roads.addWidget(self.row(self.button('编辑属性',self.edit_road),self.button('删除道路',self.delete_road)))
         roads.addWidget(self.row(self.button('导入路网',lambda:self.import_library('roads')),self.button('导出路网',lambda:self.export_library('roads'))))
-        roads.addWidget(self.button('载入新版候选路网',self.reload_roads))
+        roads.addWidget(self.button('载入内置路网',self.reload_roads))
         roads.addWidget(self.text('“移动 / 选路”中单击道路选中并拖点，双击编辑属性，右键可编辑或删除；也可从列表选择。绘制时 Enter / 双击结束，相交处需要显式节点。',True))
         notes=self.group('WRC 路书',layout)
         self.note_list=QListWidget();self.note_list.setMaximumHeight(140);self.note_list.itemDoubleClicked.connect(lambda _:self.edit_note());notes.addWidget(self.note_list)
@@ -340,7 +343,7 @@ class MainWindow(QMainWindow):
         self.preview.clear();self.preview.setText('开启定位后显示当前地图的小地图预览')
         self.fix_label.setText('尚未定位');self.fix_detail.setText('已切换地图，正在准备对应的定位特征。')
         self.route_label.setText('路线尚未规划');self.coordinate_label.setText('地图坐标 —')
-        name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator 0.5 · '+name)
+        name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator 0.5.1 · '+name)
         self.save_settings();self.notify(f'已切换到 {name}；道路、收藏和路书已载入。开启定位后重新开始导航。')
         return True
 
@@ -350,10 +353,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(map_info(map_id)['name']+' 视觉定位已就绪 · 请开启定位')
 
     def reload_roads(self):
-        if QMessageBox.question(self,'载入道路数据','替换当前道路为新版候选路网？目的地、危险区和路书保留。当前完整配置会先备份；可用撤销恢复。')!=QMessageBox.Yes:return
+        if QMessageBox.question(self,'载入道路数据','替换当前道路为内置路网？目的地、危险区和路书保留。当前完整配置会先备份；可用撤销恢复。')!=QMessageBox.Yes:return
         atomic_json(user_dir()/f'project-before-road-reload-{time.time_ns()}.json',self.project)
         self.snapshot();latest=read_project(map_asset(self.project['map'],'project'))
-        self.project['roads']=latest['roads'];self.project['road_data_revision']=latest['road_data_revision'];self.changed();self.notify('新版候选道路已载入；原配置已备份')
+        self.project['roads']=latest['roads'];self.project['road_data_revision']=latest['road_data_revision'];self.changed();self.notify('内置道路已载入；原配置已备份')
 
     def snapshot(self):
         self.history.append(deepcopy(self.project));self.history=self.history[-30:]
@@ -392,7 +395,7 @@ class MainWindow(QMainWindow):
 
     def refresh_lists(self):
         self.road_list.blockSignals(True);selected=self.map.selected_road;self.road_list.clear()
-        for r in self.project['roads']:self.road_list.addItem(f"{'✓' if r['confirmed'] else '○'} {r['name']}  /  {KINDS[r['kind']]}")
+        for r in self.project['roads']:self.road_list.addItem(f"{r['name']}  /  {KINDS[r['kind']]}")
         self.road_list.setCurrentRow(next((i for i,r in enumerate(self.project['roads']) if r['id']==selected),-1));self.road_list.blockSignals(False)
         self.note_list.clear()
         for n in self.project['notes']:self.note_list.addItem(f"{NOTE_TYPES[n['type']]} {n['grade'] if n['type'] in ('left','right') else ''} · {n.get('text') or '标准播报'}")
@@ -404,6 +407,8 @@ class MainWindow(QMainWindow):
         self.waypoint_list.clear()
         for i,p in enumerate(self.project['waypoints']):self.waypoint_list.addItem(f'{i+1:02}  途经 {p[0]:.0f}, {p[1]:.0f}')
         self.waypoint_list.setVisible(bool(self.project['waypoints']))
+        for button in self.clear_waypoint_buttons:button.setEnabled(bool(self.project['waypoints']))
+        for button in self.clear_avoid_buttons:button.setEnabled(bool(self.project['avoid']))
         self.saved_dest.blockSignals(True);self.saved_dest.clear();self.saved_dest.addItem('选择收藏的目的地')
         for d in self.project['destinations']:self.saved_dest.addItem(d['name'])
         self.saved_dest.blockSignals(False)
@@ -540,7 +545,7 @@ class MainWindow(QMainWindow):
         except ValueError as error:self.notify('收藏未保存：'+str(error));return False
         self.snapshot();self.project=candidate;self.refresh_lists();self.refresh_map();self.autosave.start()
         self.favorite_list.setCurrentRow(len(self.project['route_library'])-1)
-        detail=f'补入 {count} 条未实测道路。' if saved['build_roads'] else '未新增公共道路。'
+        detail=f'补入 {count} 条道路。' if saved['build_roads'] else '未新增公共道路。'
         self.notify('已收藏完整路径；'+detail+'可在“路线收藏”载入。')
         return True
 
@@ -668,6 +673,20 @@ class MainWindow(QMainWindow):
         i=self.waypoint_list.currentRow()
         if i>=0:self.snapshot();self.project['waypoints'].pop(i);self.changed()
 
+    def clear_button(self,key,location):
+        waypoint=key=='waypoints'
+        label='清空途经点' if waypoint else '清空危险区'
+        button=self.button(label,lambda:self.clear_annotations(key))
+        button.setObjectName('clear_'+key+'_'+location)
+        button.setToolTip('仅清除当前地图的'+('途经点' if waypoint else '危险区域')+'；保留目的地、道路与收藏，可撤销')
+        (self.clear_waypoint_buttons if waypoint else self.clear_avoid_buttons).append(button)
+        return button
+
+    def clear_annotations(self,key):
+        if key not in ('waypoints','avoid') or not self.project[key]:return
+        count=len(self.project[key]);self.snapshot();self.project[key]=[];self.changed()
+        self.notify(f"已清空 {count} 个{'途经点' if key=='waypoints' else '危险区域'}，可点击撤销恢复")
+
     def move_item(self,key,p):
         # The scene item emits on mouse release; defer rebuilding its scene until
         # the event handler has returned to Qt.
@@ -708,11 +727,11 @@ class MainWindow(QMainWindow):
 
     def sync_policy(self):
         for k,w in self.kind_checks.items():w.blockSignals(True);w.setChecked(k in self.project['policy']['allowed']);w.blockSignals(False)
-        for w,value in [(self.confirmed,self.project['policy']['confirmed_only']),(self.roundtrip,self.project['roundtrip'])]:w.blockSignals(True);w.setChecked(value);w.blockSignals(False)
+        self.roundtrip.blockSignals(True);self.roundtrip.setChecked(self.project['roundtrip']);self.roundtrip.blockSignals(False)
 
     def change_policy(self):
-        if not hasattr(self,'confirmed'):return
-        self.snapshot();self.project['policy']={'allowed':[k for k,w in self.kind_checks.items() if w.isChecked()],'confirmed_only':self.confirmed.isChecked()};self.project['roundtrip']=self.roundtrip.isChecked();self.changed()
+        if not hasattr(self,'kind_checks'):return
+        self.snapshot();self.project['policy']={'allowed':[k for k,w in self.kind_checks.items() if w.isChecked()],'confirmed_only':False};self.project['roundtrip']=self.roundtrip.isChecked();self.changed()
 
     def choose_destination(self,index):
         if index>0:self.snapshot();self.detach_favorite();self.project['destination']=list(self.project['destinations'][index-1]['point']);self.changed()
@@ -760,7 +779,7 @@ class MainWindow(QMainWindow):
             return False
         scale=self.project['meters_per_pixel'];length=self.route.length*(scale or 1)
         total=f'{length/1000:.2f} km' if scale else f'{length:.0f} 地图单位'
-        self.route_label.setText(f"{total} · {len(self.project['waypoints'])} 个途经点\n{self.route.unconfirmed} 条候选路段待实测 · 端点吸附偏移 {max(self.route.snap_distances)*(scale or 1):.0f} {'m' if scale else '单位'}")
+        self.route_label.setText(f"{total} · {len(self.project['waypoints'])} 个途经点\n端点吸附偏移 {max(self.route.snap_distances)*(scale or 1):.0f} {'m' if scale else '单位'}")
         self.refresh_map()
         if not quiet:self.notify('已沿完整收藏规划，危险区局部绕行' if saved else '路线已规划；拖动绿点可调整必经位置')
         return True
@@ -1008,7 +1027,7 @@ class MainWindow(QMainWindow):
             '7. 收藏可勾选“贴合现有道路”，粗略放点后预览沿路路径。关闭时保留完整走法并选择是否建立道路。导入同样确认选项；不建路也可导航，仅该收藏使用。导出保留完整路径、类型、粗绘点、选项与路书，可反向载入。收藏仍遵守危险区与道路规则。\n'
             '8. 常规提示路口动作和沿路距离；WRC 提示弯级、直角和手动急刹车等，显示后续三条路书。两种模式提前量独立调整，可在导航页查看播报列表。\n\n'
             '9. OZETI、BAKURANI、ZESTAFONA 分别保存道路、收藏、危险区、路书和比例尺。切图会保存当前配置并停止导航；重新开启定位后继续。完整配置导入会切至对应地图，路网和收藏资料库需先切到同一地图再合并。\n\n'
-            '候选道路与弯级均需实测。路线端点吸附到道路，不包含未知地形的末段引导。图片无法识别地雷、实时路障或证明越野可通行。\n'
+            '道路按分类直接参与规划，无需设置确认状态；地图道路统一用虚线，导航路线保持实线。途经点和危险区可分别一键清空，并可撤销。路线端点吸附到道路，不包含未知地形的末段引导。图片无法识别地雷、实时路障或证明越野可通行。\n'
             '仅获取指定屏幕区域，不读取游戏内存或自动控制载具。第三方工具许可仍以游戏方规定为准。\n\n'
             f'配置自动保存在：{user_dir()}\n导出 JSON 可备份或共享完整地图配置。')
 

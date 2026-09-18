@@ -23,10 +23,12 @@ def public_files():
     # Community submissions are reviewed data and documentation, not executables.
     community=ROOT/'community'
     if community.is_dir():
-        allowed={'.md','.json','.png','.jpg','.jpeg','.webp'}
+        allowed={'.md','.txt','.json','.png','.jpg','.jpeg','.webp'}
         paths.extend(p.relative_to(ROOT) for p in community.rglob('*')
                      if p.is_file() and not p.is_symlink() and p.suffix.lower() in allowed
                      and not any(part.startswith('.') for part in p.relative_to(community).parts))
+        paths.extend(p.relative_to(ROOT) for p in (community/'guide-images').glob('*.svg')
+                     if p.is_file() and not p.is_symlink())
     return sorted(set(paths),key=lambda p:p.as_posix())
 
 

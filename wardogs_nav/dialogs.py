@@ -24,15 +24,14 @@ class RoadDialog(QDialog):
         self.kind=QComboBox()
         for value,label in KINDS.items():self.kind.addItem(label,value)
         self.kind.setCurrentIndex(self.kind.findData(road.get('kind','minor')))
-        self.confirmed=QCheckBox('已在游戏内确认可通行');self.confirmed.setChecked(road.get('confirmed',False))
         self.note=QLineEdit(road.get('note',''))
-        form.addRow('名称',self.name);form.addRow('分类',self.kind);form.addRow('',self.confirmed);form.addRow('备注',self.note)
+        form.addRow('名称',self.name);form.addRow('分类',self.kind);form.addRow('备注',self.note)
         layout.addLayout(form)
-        label=QLabel('图片只能提供候选；请结合路宽、树木、坡度与桥梁实测。');label.setWordWrap(True);layout.addWidget(label)
+        label=QLabel('保存后即可用于规划；路线是否使用此道路取决于道路分类和危险区域。');label.setWordWrap(True);layout.addWidget(label)
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
 
     def values(self):
-        return dict(name=self.name.text().strip() or '未命名道路',kind=self.kind.currentData(),confirmed=self.confirmed.isChecked(),note=self.note.text())
+        return dict(name=self.name.text().strip() or '未命名道路',kind=self.kind.currentData(),confirmed=True,note=self.note.text())
 
 
 class FavoriteImportDialog(QDialog):
@@ -52,7 +51,7 @@ class FavoriteImportDialog(QDialog):
             self.road_action.addItem(f'沿用文件设置（{builds} 条建路，{len(routes)-builds} 条仅收藏）','stored')
             self.road_action.setCurrentIndex(3)
         layout.addWidget(QLabel('不贴合时，是否按照路线建立道路？'));layout.addWidget(self.road_action)
-        note=QLabel('不建立道路也可按原路线导航；缺路仅在该收藏行程中使用，仍受分类、实测过滤和危险区约束。建立的道路标为待实测，可撤销本次导入。')
+        note=QLabel('不建立道路也可按原路线导航；缺路仅在该收藏行程中使用，仍受道路分类和危险区约束。建立的道路可直接用于规划，本次导入可撤销。')
         note.setWordWrap(True);layout.addWidget(note)
         self.buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
         self.buttons.button(QDialogButtonBox.Ok).setText('确认导入')

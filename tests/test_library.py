@@ -25,7 +25,7 @@ def test_supplement_only_internal_gap_and_idempotent():
     roads=[road('before',[[0,0],[40,0]]),road('after',[[60,0],[100,0]])]
     saved=favorite([[0,0],[100,0]],['offroad'])
     assert supplement_roads(roads,saved)==1
-    assert roads[-1]['kind']=='offroad' and not roads[-1]['confirmed']
+    assert roads[-1]['kind']=='offroad' and roads[-1]['confirmed']
     assert 35<=roads[-1]['points'][0][0]<=42 and 58<=roads[-1]['points'][-1][0]<=65
     assert supplement_roads(roads,saved)==0
     route=plan(roads,[[0,0],[100,0]],policy['allowed'])
@@ -51,10 +51,10 @@ def test_saved_route_keeps_detour_even_when_shortcut_available_and_can_reverse()
     assert part.length==pytest.approx(260)
 
 
-def test_saved_route_missing_road_type_and_confirmed_are_hard_constraints():
+def test_saved_route_enforces_road_type_but_ignores_legacy_confirmation_filter():
     roads=[];saved=favorite([[0,0],[100,0]],['offroad']);supplement_roads(roads,saved)
     with pytest.raises(ValueError,match='未允许'):follow_saved(roads,saved,dict(allowed=['major'],confirmed_only=False))
-    with pytest.raises(ValueError,match='未实测'):follow_saved(roads,saved,dict(allowed=['offroad'],confirmed_only=True))
+    assert follow_saved(roads,saved,dict(allowed=['offroad'],confirmed_only=True)).length==pytest.approx(100)
 
 
 def test_saved_local_danger_detour_keeps_outer_sections():

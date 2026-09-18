@@ -16,7 +16,7 @@ def test_map_upgrade_preserves_user_destinations_zones_and_roads():
 
 
 def test_user_road_edits_or_deletions_are_not_silently_replaced():
-    old=read_project(asset_path('legacy-road-seed.json'));old['roads'][0]['confirmed']=True
+    old=read_project(asset_path('legacy-road-seed.json'));old['roads'][0]['name']='用户修改过的道路名称'
     updated,changed=upgrade_road_data(old)
     assert not changed and updated==old
     old['roads'].pop()
