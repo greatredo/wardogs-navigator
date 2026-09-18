@@ -106,7 +106,7 @@ class MainWindow(QMainWindow):
         self.minimap_overlay.mask_changed.connect(lambda mask:setattr(self.worker,'path_mask',mask))
         self.hud.changed.connect(self.save_settings)
         self.build_ui()
-        self.setWindowTitle('WARDOGS Navigator 0.5.1 · '+map_info(self.project['map'])['name'])
+        self.setWindowTitle('WARDOGS Navigator 0.5.2 · '+map_info(self.project['map'])['name'])
         self.setWindowFlag(Qt.WindowStaysOnTopHint,self.settings['main_topmost'])
         self.refresh_lists()
         self.refresh_map()
@@ -163,11 +163,13 @@ class MainWindow(QMainWindow):
         self.tabs=QTabWidget();self.tabs.setMinimumWidth(350);self.tabs.setMaximumWidth(475);splitter.addWidget(self.tabs)
         right=QWidget();right_layout=QVBoxLayout(right);right_layout.setContentsMargins(8,0,0,0)
         toolbar_box=QWidget();toolbar_box.setStyleSheet('QPushButton { padding:7px 4px; }')
-        toolbar=QHBoxLayout(toolbar_box);toolbar.setContentsMargins(0,0,0,0)
+        toolbar_layout=QVBoxLayout(toolbar_box);toolbar_layout.setContentsMargins(0,0,0,0);toolbar_layout.setSpacing(6)
+        toolbar=QHBoxLayout();toolbar_layout.addLayout(toolbar)
         for label,tool in [('移动 / 选路','pan'),('目的地','destination'),('危险区','avoid'),('途经点','waypoint'),('绘制道路','road')]:toolbar.addWidget(self.button(label,lambda _,t=tool:self.set_tool(t)))
-        toolbar.addWidget(self.clear_button('waypoints','toolbar'))
-        toolbar.addWidget(self.clear_button('avoid','toolbar'))
         toolbar.addStretch();toolbar.addWidget(self.button('适应地图',lambda:self.map.fit()));right_layout.addWidget(toolbar_box)
+        cleanup=QHBoxLayout();toolbar_layout.addLayout(cleanup)
+        cleanup.addWidget(self.clear_route_button('toolbar'))
+        cleanup.addWidget(self.clear_button('waypoints','toolbar'));cleanup.addWidget(self.clear_button('avoid','toolbar'));cleanup.addStretch()
         self.draw_kind=QComboBox()
         for key,label in KINDS.items():self.draw_kind.addItem(label,key)
         self.draw_kind.setCurrentIndex(1)
@@ -192,7 +194,7 @@ class MainWindow(QMainWindow):
         self.map.road_delete_requested.connect(self.delete_road_on_map)
         self.map.hover.connect(lambda x,y:self.coordinate_label.setText(f'地图坐标  {x:.0f}, {y:.0f}'))
         bottom=QHBoxLayout();legend=self.text('┄ 大路   ┄ 小路   ┄ 野地   ━ 导航路线',True);legend.setWordWrap(False);bottom.addWidget(legend);bottom.addStretch()
-        self.coordinate_label=self.text('地图坐标 —',True);bottom.addWidget(self.coordinate_label);right_layout.addLayout(bottom)
+        self.coordinate_label=self.text('地图坐标 —',True);self.coordinate_label.setWordWrap(False);bottom.addWidget(self.coordinate_label);right_layout.addLayout(bottom)
         splitter.addWidget(right);splitter.setSizes([390,1050]);splitter.setStretchFactor(1,1)
         self.build_navigation();self.build_editor();self.build_library();self.build_settings()
         self.statusBar().showMessage('初始化视觉定位…')
@@ -207,6 +209,7 @@ class MainWindow(QMainWindow):
         self.start_button=self.button('开始导航',self.start_navigation,True);status.addWidget(self.start_button)
         status.addWidget(self.row(self.button('停止',self.stop_navigation),self.button('显示图标',self.show_hud),self.button('隐藏图标',self.hud.hide)))
         target=self.group('目的地与途经点',layout)
+        target.addWidget(self.clear_route_button('navigation'))
         target.addWidget(self.row(self.clear_button('waypoints','navigation'),self.clear_button('avoid','navigation')))
         self.destination_label=self.text('在地图点选目的地');target.addWidget(self.destination_label)
         self.saved_dest=QComboBox();self.saved_dest.currentIndexChanged.connect(self.choose_destination);target.addWidget(self.saved_dest)
@@ -343,7 +346,7 @@ class MainWindow(QMainWindow):
         self.preview.clear();self.preview.setText('开启定位后显示当前地图的小地图预览')
         self.fix_label.setText('尚未定位');self.fix_detail.setText('已切换地图，正在准备对应的定位特征。')
         self.route_label.setText('路线尚未规划');self.coordinate_label.setText('地图坐标 —')
-        name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator 0.5.1 · '+name)
+        name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator 0.5.2 · '+name)
         self.save_settings();self.notify(f'已切换到 {name}；道路、收藏和路书已载入。开启定位后重新开始导航。')
         return True
 
@@ -687,6 +690,21 @@ class MainWindow(QMainWindow):
         count=len(self.project[key]);self.snapshot();self.project[key]=[];self.changed()
         self.notify(f"已清空 {count} 个{'途经点' if key=='waypoints' else '危险区域'}，可点击撤销恢复")
 
+    def clear_route_button(self,location):
+        button=self.button('清除当前路线',self.clear_current_route)
+        button.setObjectName('clear_current_route_'+location)
+        button.setToolTip('停止导航并清除当前目的地、途经点和路线显示；退出当前收藏，保留已保存的道路、收藏、危险区与路线规则')
+        return button
+
+    def clear_current_route(self):
+        if self.project['destination'] is not None or self.project['waypoints'] or self.active_favorite():self.snapshot()
+        self.project['destination']=None;self.project['waypoints']=[];self.detach_favorite();self.home=None
+        self.changed(replan=False)
+        self.navigator=Navigator();self.minimap_overlay.points=[];self.worker.path_mask=None
+        self.route_label.setText('路线已清除；请选择新的目的地')
+        self.set_hud({'state':'idle','text':'路线已清除'});self.hud.hide()
+        self.notify('当前路线、目的地和途经点已清除，导航已停止；可撤销恢复行程设置')
+
     def move_item(self,key,p):
         # The scene item emits on mouse release; defer rebuilding its scene until
         # the event handler has returned to Qt.
@@ -1027,7 +1045,7 @@ class MainWindow(QMainWindow):
             '7. 收藏可勾选“贴合现有道路”，粗略放点后预览沿路路径。关闭时保留完整走法并选择是否建立道路。导入同样确认选项；不建路也可导航，仅该收藏使用。导出保留完整路径、类型、粗绘点、选项与路书，可反向载入。收藏仍遵守危险区与道路规则。\n'
             '8. 常规提示路口动作和沿路距离；WRC 提示弯级、直角和手动急刹车等，显示后续三条路书。两种模式提前量独立调整，可在导航页查看播报列表。\n\n'
             '9. OZETI、BAKURANI、ZESTAFONA 分别保存道路、收藏、危险区、路书和比例尺。切图会保存当前配置并停止导航；重新开启定位后继续。完整配置导入会切至对应地图，路网和收藏资料库需先切到同一地图再合并。\n\n'
-            '道路按分类直接参与规划，无需设置确认状态；地图道路统一用虚线，导航路线保持实线。途经点和危险区可分别一键清空，并可撤销。路线端点吸附到道路，不包含未知地形的末段引导。图片无法识别地雷、实时路障或证明越野可通行。\n'
+            '道路按分类直接参与规划，无需设置确认状态；地图道路统一用虚线，导航路线保持实线。“清除当前路线”会停止导航，清掉本次目的地、途经点和路线显示，并退出当前收藏；已保存的道路、收藏和危险区保留。可撤销恢复行程设置，重新开始导航需手动点击。途经点和危险区也可分别清空。路线端点吸附到道路，不包含未知地形的末段引导。图片无法识别地雷、实时路障或证明越野可通行。\n'
             '仅获取指定屏幕区域，不读取游戏内存或自动控制载具。第三方工具许可仍以游戏方规定为准。\n\n'
             f'配置自动保存在：{user_dir()}\n导出 JSON 可备份或共享完整地图配置。')
 
