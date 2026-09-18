@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="600" viewBox="0 0 1080 600">
+<style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC","Segoe UI",sans-serif}</style>
+<rect x="0" y="0" width="1080" height="600" rx="0" fill="#eef2f6" stroke="none"/>
+<rect x="0" y="0" width="1080" height="124" rx="0" fill="#152a3a" stroke="none"/>
+<rect x="30" y="28" width="54" height="54" rx="14" fill="#6ce0b6" stroke="none"/>
+<text x="57" y="65" font-size="28" fill="#152a3a" text-anchor="middle" font-weight="700">06</text>
+<text x="105" y="56" font-size="28" fill="#ffffff" text-anchor="start" font-weight="700">把配置文件放到说明旁边</text>
+<text x="105" y="93" font-size="18" fill="#c1d4df" text-anchor="start" font-weight="400">先进入配置包文件夹，再点 Add file → Upload files</text>
+<rect x="30" y="146" width="1020" height="390" rx="12" fill="#ffffff" stroke="#d6dfe8"/>
+<text x="32" y="575" font-size="17" fill="#526577" text-anchor="start" font-weight="400">操作示意图 · 并非实时网页截图 · 按钮以 GitHub 实际页面为准</text>
+<text x="58" y="189" font-size="23" fill="#203747" text-anchor="start" font-weight="600">community / ozeti / 你的用户名 / my-roads</text>
+<rect x="58" y="212" width="964" height="141" rx="8" fill="#f6f8fa" stroke="#83aece"/>
+<text x="540" y="257" font-size="23" fill="#203747" text-anchor="middle" font-weight="400">拖入 JSON，或点击 choose your files</text>
+<text x="540" y="299" font-size="23" fill="#126346" text-anchor="middle" font-weight="600">roads.json     routes.json     project.json</text>
+<text x="540" y="331" font-size="19" fill="#526577" text-anchor="middle" font-weight="400">按需要选择，不必三种都传；不要上传 ZIP 或 EXE。</text>
+<text x="58" y="394" font-size="22" fill="#203747" text-anchor="start" font-weight="400">分支：share-ozeti-my-roads</text>
+<rect x="758" y="371" width="264" height="46" rx="7" fill="#1f7b4f" stroke="#1f7b4f"/>
+<text x="890.0" y="401" font-size="19" fill="#ffffff" text-anchor="middle" font-weight="600">Commit changes</text>
+<rect x="58" y="443" width="964" height="77" rx="8" fill="#e8f7f0" stroke="none"/>
+<text x="78" y="472" font-size="21" fill="#126346" text-anchor="start" font-weight="700">成功后，同一文件夹里至少有 README.md 和一种 JSON</text>
+<text x="78" y="502" font-size="18" fill="#325849" text-anchor="start" font-weight="400">同名文件再次上传，可用于修改当前投稿；继续保存到同一分支。</text>
+</svg>

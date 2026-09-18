@@ -91,8 +91,8 @@ def validate_project(data):
     ids = set()
     for road in data['roads']:
         if not isinstance(road,dict):raise ValueError('道路必须是对象')
-        if road.get('kind') not in KINDS or not isinstance(road.get('confirmed'), bool):
-            raise ValueError('道路分类或实测状态无效')
+        if road.get('kind') not in KINDS:
+            raise ValueError('道路分类无效')
         if not isinstance(road.get('name'), str) or len(road['name']) > 200:
             raise ValueError('道路名称无效')
         if not isinstance(road.get('id'), str) or road['id'] in ids:
@@ -175,8 +175,10 @@ def validate_project(data):
     if not isinstance(policy,dict):raise ValueError('路线规则必须是对象')
     if not isinstance(policy.get('allowed'), list) or any(x not in KINDS for x in policy['allowed']):
         raise ValueError('路线规则无效')
-    if not isinstance(policy.get('confirmed_only'), bool):
-        raise ValueError('实测过滤状态无效')
+    # Keep schema-1 compatibility fields, but road availability no longer has
+    # a confirmation workflow. This does not assert real-world verification.
+    for road in result['roads']:road['confirmed']=True
+    policy['confirmed_only']=False
     if not isinstance(result.get('roundtrip', False), bool):
         raise ValueError('往返模式无效')
     return result

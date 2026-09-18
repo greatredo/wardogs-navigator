@@ -79,5 +79,6 @@ class MinimapOverlay(QWidget):
         path=QPainterPath(QPointF(*self.points[0]))
         for xy in self.points[1:]:path.lineTo(*xy)
         width=float(self.settings['line_width'])
-        p.setPen(QPen(QColor(8,25,27,210),width+2,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(path)
-        p.setPen(QPen(QColor('#67edc3'),width,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(path)
+        for color,stroke in [(QColor(8,25,27,210),width+2),(QColor('#67edc3'),width)]:
+            pen=QPen(color,stroke,Qt.DashLine,Qt.RoundCap,Qt.RoundJoin)
+            pen.setDashPattern([16/stroke,12/stroke]);p.setPen(pen);p.drawPath(path)

@@ -17,6 +17,10 @@ Copy-Item -LiteralPath 'LICENSE' -Destination (Join-Path $packageRoot 'LICENSE')
 Copy-Item -LiteralPath 'NOTICE' -Destination (Join-Path $packageRoot 'NOTICE') -Force
 Copy-Item -LiteralPath 'assets\sample_minimap.png' -Destination (Join-Path $packageRoot '定位诊断样例.png') -Force
 Copy-Item -LiteralPath '启动导航.cmd' -Destination (Join-Path $packageRoot '启动导航.cmd') -Force
+$guideRoot = Join-Path $packageRoot 'community'
+New-Item -ItemType Directory -Force $guideRoot | Out-Null
+Copy-Item -LiteralPath 'community\新手投稿图文教程.md','community\新手投稿纯文字教程.txt' -Destination $guideRoot -Force
+Copy-Item -LiteralPath 'community\guide-images' -Destination $guideRoot -Recurse -Force
 $licenseRoot = Join-Path $packageRoot 'licenses'
 New-Item -ItemType Directory -Force $licenseRoot | Out-Null
 & $python tools\copy_licenses.py $licenseRoot

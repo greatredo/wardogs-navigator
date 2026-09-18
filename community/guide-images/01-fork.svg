@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="600" viewBox="0 0 1080 600">
+<style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC","Segoe UI",sans-serif}</style>
+<rect x="0" y="0" width="1080" height="600" rx="0" fill="#eef2f6" stroke="none"/>
+<rect x="0" y="0" width="1080" height="124" rx="0" fill="#152a3a" stroke="none"/>
+<rect x="30" y="28" width="54" height="54" rx="14" fill="#6ce0b6" stroke="none"/>
+<text x="57" y="65" font-size="28" fill="#152a3a" text-anchor="middle" font-weight="700">03</text>
+<text x="105" y="56" font-size="28" fill="#ffffff" text-anchor="start" font-weight="700">先建立自己的副本</text>
+<text x="105" y="93" font-size="18" fill="#c1d4df" text-anchor="start" font-weight="400">正式项目 → Fork → 自己账号下的项目</text>
+<rect x="30" y="146" width="1020" height="390" rx="12" fill="#ffffff" stroke="#d6dfe8"/>
+<text x="32" y="575" font-size="17" fill="#526577" text-anchor="start" font-weight="400">操作示意图 · 并非实时网页截图 · 按钮以 GitHub 实际页面为准</text>
+<text x="58" y="198" font-size="25" fill="#203747" text-anchor="start" font-weight="700">greatredo / wardogs-navigator</text>
+<rect x="850" y="166" width="170" height="46" rx="7" fill="#1f7b4f" stroke="#1f7b4f"/>
+<text x="935.0" y="196" font-size="19" fill="#ffffff" text-anchor="middle" font-weight="600">Fork  ▾</text>
+<text x="60" y="242" font-size="19" fill="#203747" text-anchor="start" font-weight="400">先核对左上角：这里是 greatredo 的正式项目。</text>
+<rect x="58" y="271" width="964" height="100" rx="8" fill="#f6f8fa" stroke="none"/>
+<text x="78" y="308" font-size="22" fill="#203747" text-anchor="start" font-weight="400">Owner：你的 GitHub 用户名</text>
+<text x="78" y="345" font-size="22" fill="#203747" text-anchor="start" font-weight="400">Repository name：wardogs-navigator</text>
+<rect x="809" y="384" width="212" height="46" rx="7" fill="#1f7b4f" stroke="#1f7b4f"/>
+<text x="915.0" y="414" font-size="19" fill="#ffffff" text-anchor="middle" font-weight="600">Create fork</text>
+<rect x="58" y="443" width="964" height="77" rx="8" fill="#e8f7f0" stroke="none"/>
+<text x="78" y="472" font-size="21" fill="#126346" text-anchor="start" font-weight="700">成功后看左上角：你的用户名 / wardogs-navigator</text>
+<text x="78" y="502" font-size="18" fill="#325849" text-anchor="start" font-weight="400">后续上传和修改都在自己的副本里完成。</text>
+</svg>

@@ -19,7 +19,7 @@ def run_selftest(output):
     output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)
     os.environ.setdefault('WARDOGS_NAV_DATA',str(output.parent/(output.stem+'-data')))
     app=QApplication.instance() or QApplication([]);app.setStyle('Fusion');app.setStyleSheet(STYLE)
-    report={'version':'0.5.0','game_test':False,'checks':{},'errors':[]}
+    report={'version':'0.5.1','game_test':False,'checks':{},'errors':[]}
     window=None
     try:
         p=read_project(asset_path('default_project.json'))

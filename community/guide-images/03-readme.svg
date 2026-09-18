@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="600" viewBox="0 0 1080 600">
+<style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC","Segoe UI",sans-serif}</style>
+<rect x="0" y="0" width="1080" height="600" rx="0" fill="#eef2f6" stroke="none"/>
+<rect x="0" y="0" width="1080" height="124" rx="0" fill="#152a3a" stroke="none"/>
+<rect x="30" y="28" width="54" height="54" rx="14" fill="#6ce0b6" stroke="none"/>
+<text x="57" y="65" font-size="28" fill="#152a3a" text-anchor="middle" font-weight="700">05</text>
+<text x="105" y="56" font-size="28" fill="#ffffff" text-anchor="start" font-weight="700">先写说明，自动创建文件夹</text>
+<text x="105" y="93" font-size="18" fill="#c1d4df" text-anchor="start" font-weight="400">Add file → Create new file → 填完整路径和说明</text>
+<rect x="30" y="146" width="1020" height="390" rx="12" fill="#ffffff" stroke="#d6dfe8"/>
+<text x="32" y="575" font-size="17" fill="#526577" text-anchor="start" font-weight="400">操作示意图 · 并非实时网页截图 · 按钮以 GitHub 实际页面为准</text>
+<text x="58" y="190" font-size="19" fill="#526577" text-anchor="start" font-weight="400">文件名 / 路径</text>
+<rect x="58" y="205" width="964" height="48" rx="6" fill="#f6f8fa" stroke="#bdcad5"/>
+<text x="74" y="236" font-size="24" fill="#203747" text-anchor="start" font-weight="600">community/ozeti/riverdriver/my-roads/README.md</text>
+<text x="58" y="283" font-size="20" fill="#126346" text-anchor="start" font-weight="400">riverdriver 换成你的用户名；ozeti 换成实际地图的目录名。</text>
+<rect x="58" y="302" width="650" height="123" rx="6" fill="#f6f8fa" stroke="#bdcad5"/>
+<text x="76" y="338" font-size="23" fill="#203747" text-anchor="start" font-weight="600"># 我的手绘道路</text>
+<text x="76" y="371" font-size="20" fill="#203747" text-anchor="start" font-weight="400">作者、版本、用途、导入方法、实际测试范围……</text>
+<text x="76" y="403" font-size="18" fill="#526577" text-anchor="start" font-weight="400">在这里粘贴教程里的模板，并填写自己的内容。</text>
+<rect x="748" y="371" width="274" height="46" rx="7" fill="#1f7b4f" stroke="#1f7b4f"/>
+<text x="885.0" y="401" font-size="19" fill="#ffffff" text-anchor="middle" font-weight="600">Commit changes…</text>
+<rect x="58" y="443" width="964" height="77" rx="8" fill="#e8f7f0" stroke="none"/>
+<text x="78" y="472" font-size="21" fill="#126346" text-anchor="start" font-weight="700">保存到 share-ozeti-my-roads 这个投稿分支</text>
+<text x="78" y="502" font-size="18" fill="#325849" text-anchor="start" font-weight="400">这一步只保存到你的副本；上传 JSON 后再提交审核。</text>
+</svg>

@@ -62,7 +62,7 @@ class RouteError(ValueError):
 
 
 def usable(road, allowed, confirmed_only):
-    return road['kind'] in allowed and (not confirmed_only or road['confirmed'])
+    return road['kind'] in allowed
 
 
 def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45.):
@@ -79,7 +79,7 @@ def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_sna
                 continue
             segments.append((tuple(a), tuple(b), road))
     if not segments:
-        raise RouteError('当前规则下没有可用道路；可检查分类、实测过滤与避让区')
+        raise RouteError('当前规则下没有可用道路；可检查道路分类与避让区')
     splits = [[(0., a), (1., b)] for a, b, _ in segments]
     # A spatial index keeps image-derived road networks responsive. It does not
     # connect intersections: the same explicit-vertex rule is evaluated below.
@@ -108,7 +108,7 @@ def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_sna
             if not any(blocked(projection[1],projection[1],z) for z in avoid):
                 options.append((projection,i))
         if not options:
-            raise RouteError('当前规则下没有可用道路；可检查分类、实测过滤与避让区')
+            raise RouteError('当前规则下没有可用道路；可检查道路分类与避让区')
         (gap, q, t), index = min(options, key=lambda x: x[0][0])
         if gap > max_snap:
             raise RouteError(f'起终点或途经点距可用道路过远（{gap:.0f} 地图像素），请补画连接路或调整位置')
@@ -174,7 +174,7 @@ def plan(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45.):
         raise RouteError('起点与终点太近，请选择更远的目的地')
     result = Route(points, [r['kind'] for r in route_roads], [r['id'] for r in route_roads],
                  sum(distance(a, b) for a, b in zip(points, points[1:])), gaps,
-                 len({r['id'] for r in route_roads if not r['confirmed']}))
+                 0)
     result.junctions = junctions_on_route(nodes, adjacency, result)
     return result
 

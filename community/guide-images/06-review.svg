@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="600" viewBox="0 0 1080 600">
+<style>text{font-family:"Microsoft YaHei","Noto Sans CJK SC","Segoe UI",sans-serif}</style>
+<rect x="0" y="0" width="1080" height="600" rx="0" fill="#eef2f6" stroke="none"/>
+<rect x="0" y="0" width="1080" height="124" rx="0" fill="#152a3a" stroke="none"/>
+<rect x="30" y="28" width="54" height="54" rx="14" fill="#6ce0b6" stroke="none"/>
+<text x="57" y="65" font-size="28" fill="#152a3a" text-anchor="middle" font-weight="700">08</text>
+<text x="105" y="56" font-size="28" fill="#ffffff" text-anchor="start" font-weight="700">收到审核意见后，改原分支</text>
+<text x="105" y="93" font-size="18" fill="#c1d4df" text-anchor="start" font-weight="400">重新导出同名 JSON → 上传到原文件夹 → 原 PR 自动更新</text>
+<rect x="30" y="146" width="1020" height="390" rx="12" fill="#ffffff" stroke="#d6dfe8"/>
+<text x="32" y="575" font-size="17" fill="#526577" text-anchor="start" font-weight="400">操作示意图 · 并非实时网页截图 · 按钮以 GitHub 实际页面为准</text>
+<rect x="58" y="181" width="308" height="115" rx="8" fill="#e8f7f0" stroke="none"/>
+<text x="212" y="228" font-size="23" fill="#126346" text-anchor="middle" font-weight="700">Open</text>
+<text x="212" y="269" font-size="22" fill="#126346" text-anchor="middle" font-weight="400">等待审核</text>
+<rect x="386" y="181" width="308" height="115" rx="8" fill="#fff3d8" stroke="none"/>
+<text x="540" y="228" font-size="23" fill="#805a00" text-anchor="middle" font-weight="700">Changes requested</text>
+<text x="540" y="269" font-size="22" fill="#805a00" text-anchor="middle" font-weight="400">按意见修改</text>
+<rect x="714" y="181" width="308" height="115" rx="8" fill="#f0eafb" stroke="none"/>
+<text x="868" y="228" font-size="23" fill="#6a3da0" text-anchor="middle" font-weight="700">Merged</text>
+<text x="868" y="269" font-size="22" fill="#6a3da0" text-anchor="middle" font-weight="400">已经收录</text>
+<text x="60" y="341" font-size="24" fill="#203747" text-anchor="start" font-weight="600">审核中：保持同一分支、同一文件夹、同名 JSON。</text>
+<text x="60" y="384" font-size="22" fill="#526577" text-anchor="start" font-weight="400">不需要重新 Fork，也不用为补改再开一个 PR。</text>
+<rect x="58" y="443" width="964" height="77" rx="8" fill="#e8f7f0" stroke="none"/>
+<text x="78" y="472" font-size="21" fill="#126346" text-anchor="start" font-weight="700">已经 Merged，下一次更新才建立新分支、新 PR</text>
+<text x="78" y="502" font-size="18" fill="#325849" text-anchor="start" font-weight="400">先同步自己副本的 main；作者署名由 README 和贡献者名单保留。</text>
+</svg>
