@@ -1,15 +1,17 @@
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
+import time
 from copy import deepcopy
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication,QPushButton
 from wardogs_nav.app import MainWindow
-from wardogs_nav.model import read_project,validate_project,atomic_json
+from wardogs_nav.model import read_project,validate_project,atomic_json,asset_path
+from wardogs_nav.library import saved_route
 from wardogs_nav.maps import map_asset,project_path
 from wardogs_nav.routing import plan
-from wardogs_nav.vision import Fix
+from wardogs_nav.vision import Fix,read_image
 
 
 @pytest.fixture(scope='module')
@@ -87,3 +89,78 @@ def test_clear_is_saved_per_map(window):
     assert window.project['waypoints']==[[500,500]]
     assert window.switch_map('bakurani')
     assert window.project['waypoints']==[]
+
+
+@pytest.mark.parametrize('location',['navigation','toolbar'])
+@pytest.mark.parametrize('state',['navigating','stopped','waiting'])
+def test_clear_current_route_ends_trip_without_losing_saved_data(window,app,monkeypatch,location,state):
+    window.fix=Fix(x=505,y=1245,scale=.4,confidence=1,valid=True)
+    window.fix_live=True;window.fix_time=time.monotonic();window.worker.capture=True
+    window.frame=read_image(asset_path('sample_minimap.png'))
+    window.project['destination']=[1300,796];assert window.plan_route(quiet=True)
+    saved=saved_route('保留的路线收藏',window.route,build_roads=False)
+    window.project['route_library']=[saved];window.project['active_route_id']=saved['id']
+    window.project['active_route_reverse']=False;window.favorite_trip=saved
+    window.project['waypoints']=[list(window.route.points[len(window.route.points)//2])]
+    window.project['destinations']=[dict(name='保留的目的地',point=[1300,796])]
+    window.project['avoid']=[dict(shape='rect',point=[450,700],width=30,height=30)]
+    window.project['roundtrip']=True;window.home=[505,1245]
+    window.navigator.start(window.route,[],window.settings,window.project['meters_per_pixel'],True)
+    window.navigator.lap=1;window.navigator.leg='返程'
+    window.hud.show();window.update_minimap_overlay();window.refresh_lists();app.processEvents()
+    assert window.minimap_overlay.isVisible() and window.worker.path_mask
+    if state!='navigating':
+        window.stop_navigation(quiet=True)
+        assert window.route and window.map.route  # The reported stopped preview.
+    if state=='waiting':window.pending_start=True
+    before=deepcopy(window.project);stops=[];spoken=[]
+    monkeypatch.setattr(window.tts,'stop',lambda:stops.append(True))
+    monkeypatch.setattr(window,'speak',spoken.append)
+    button=window.findChild(QPushButton,'clear_current_route_'+location)
+    if location=='navigation':window.tabs.widget(0).ensureWidgetVisible(button)
+    QTest.mouseClick(button,Qt.LeftButton);app.processEvents()
+    expected=deepcopy(before);expected['destination']=None;expected['waypoints']=[]
+    expected.pop('active_route_id');expected.pop('active_route_reverse')
+    assert window.project==expected and stops
+    assert not window.navigator.active and not window.pending_start
+    assert window.route is None and window.map.route is None
+    assert window.home is None and window.favorite_trip is None
+    assert not window.hud.isVisible() and 'cue' not in window.hud.data
+    assert not window.minimap_overlay.isVisible() and not window.minimap_overlay.points
+    assert window.worker.path_mask is None
+    assert '清除' in window.route_label.text() and '选择' in window.route_label.text()
+    # An already queued camera result must not restart the cleared journey.
+    window.on_fix(Fix(x=505,y=1245,scale=.4,confidence=1,valid=True),window.frame,True)
+    assert not window.navigator.active and window.route is None and not spoken
+    assert not window.minimap_overlay.isVisible() and not window.hud.isVisible()
+    QTest.qWait(650)
+    restored=read_project(project_path('ozeti'))
+    assert restored['destination'] is None and restored['waypoints']==[]
+    assert not restored.get('active_route_id') and restored['route_library']==[saved]
+    window.undo();app.processEvents()
+    assert window.project==before and window.route is not None
+    assert not window.navigator.active and not window.pending_start
+
+
+def test_clear_current_route_persists_across_restart_and_leaves_other_map(window,app):
+    window.project['destination']=[1300,796];window.project['waypoints']=[[505,1245]]
+    assert window.switch_map('bakurani')
+    window.project['destination']=[900,900];window.project['waypoints']=[[800,800]]
+    window.clear_current_route();window.close();app.processEvents()
+    reopened=MainWindow(start_worker=False)
+    try:
+        assert reopened.project['map']=='bakurani'
+        assert reopened.project['destination'] is None and reopened.project['waypoints']==[]
+        assert reopened.route is None and not reopened.pending_start
+        assert reopened.switch_map('ozeti')
+        assert reopened.project['destination']==[1300,796] and reopened.project['waypoints']==[[505,1245]]
+    finally:reopened.close()
+
+
+def test_clearing_empty_route_does_not_add_undo_steps_and_new_trip_can_start(window):
+    window.clear_current_route();history=len(window.history)
+    window.clear_current_route();assert len(window.history)==history
+    window.fix=Fix(x=505,y=1245,scale=.4,confidence=1,valid=True)
+    window.project['destination']=[194,211];window.begin_navigation()
+    assert window.navigator.active and window.route
+    assert window.home==[505,1245] and window.navigator.lap==0

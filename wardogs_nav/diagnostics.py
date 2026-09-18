@@ -19,7 +19,7 @@ def run_selftest(output):
     output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)
     os.environ.setdefault('WARDOGS_NAV_DATA',str(output.parent/(output.stem+'-data')))
     app=QApplication.instance() or QApplication([]);app.setStyle('Fusion');app.setStyleSheet(STYLE)
-    report={'version':'0.5.1','game_test':False,'checks':{},'errors':[]}
+    report={'version':'0.5.2','game_test':False,'checks':{},'errors':[]}
     window=None
     try:
         p=read_project(asset_path('default_project.json'))
@@ -128,7 +128,11 @@ def run_selftest(output):
             report['checks']['minimap_mouse_passthrough_flag']=bool(window.minimap_overlay.windowFlags() & __import__('PySide6.QtCore',fromlist=['Qt']).Qt.WindowTransparentForInput)
             report['minimap_capture_excluded']=window.minimap_overlay.capture_excluded
             window.minimap_overlay.grab().save(str(output.with_name(output.stem+'-minimap-path.png')))
-            window.minimap_overlay.hide()
+            window.clear_current_route();app.processEvents()
+            report['checks']['clear_current_route']=(window.project['destination'] is None and not window.project['waypoints'] and not window.project.get('active_route_id')
+                and window.route is None and window.map.route is None and not window.navigator.active and not window.pending_start
+                and not window.minimap_overlay.isVisible() and window.worker.path_mask is None and not window.hud.isVisible())
+            window.grab().save(str(output.with_name(output.stem+'-cleared.png')))
             window.navigator.stop();window.watchdog.stop()
             # Exercise the production speech queue through the native SAPI
             # engine. Mute this diagnostic so it does not disturb the desktop.
