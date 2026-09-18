@@ -1,0 +1,18 @@
+WARDOGS Navigator
+Copyright 2026 Wardogs Navigator contributors
+
+Original application code and documentation are licensed under the Apache
+License, Version 2.0. See LICENSE for the full terms.
+
+Map-related source material: wardogs-calculator
+Copyright (c) 2026 Apollyon
+https://github.com/apollyon-sys/wardogs-calculator
+The upstream MIT license is retained in assets/wardogs-calculator-LICENSE.txt
+and in the licenses directory of binary distributions. Map processing includes
+cropping, coordinate alignment, feature extraction and candidate-road tracing.
+
+WARDOGS and its game imagery and marks belong to their respective rights
+holders. They are not relicensed under Apache-2.0 by this project. This project
+is unofficial and does not claim endorsement or online-use approval.
+
+Third-party libraries retain their own licenses. See THIRD_PARTY_NOTICES.md.

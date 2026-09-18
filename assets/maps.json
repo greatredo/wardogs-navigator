@@ -1,0 +1,32 @@
+[
+  {
+    "id": "ozeti",
+    "name": "OZETI",
+    "width": 1595,
+    "height": 1451,
+    "image": "ozeti.png",
+    "features": "ozeti-features.npz",
+    "project": "default_project.json",
+    "source": "map-source.json"
+  },
+  {
+    "id": "bakurani",
+    "name": "BAKURANI",
+    "width": 2047,
+    "height": 2048,
+    "image": "maps/bakurani/map.png",
+    "features": "maps/bakurani/features.npz",
+    "project": "maps/bakurani/project.json",
+    "source": "maps/bakurani/source.json"
+  },
+  {
+    "id": "zestafona",
+    "name": "ZESTAFONA",
+    "width": 2048,
+    "height": 1779,
+    "image": "maps/zestafona/map.png",
+    "features": "maps/zestafona/features.npz",
+    "project": "maps/zestafona/project.json",
+    "source": "maps/zestafona/source.json"
+  }
+]

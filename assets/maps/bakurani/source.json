@@ -1,0 +1,53 @@
+{
+  "map": "bakurani",
+  "source": "https://assets.wardogs-artillery.com/releases/assets-v1/maps/tiles/bakurani",
+  "zoom": 5,
+  "crop": [
+    1169,
+    1709,
+    6682,
+    7225
+  ],
+  "tileBounds": {
+    "minX": -0.03,
+    "maxX": 163.81,
+    "minY": -0.01,
+    "maxY": 163.83
+  },
+  "bounds": {
+    "minX": 23.35,
+    "maxX": 133.6,
+    "minY": 19.34,
+    "maxY": 129.65
+  },
+  "meters_per_pixel": 5.38671875,
+  "upstream": "https://github.com/apollyon-sys/wardogs-calculator",
+  "reference": "Public grayscale z5 tiles, cropped to configured play area",
+  "reference_to_map": [
+    [
+      0.37128353879622916,
+      0,
+      0
+    ],
+    [
+      0,
+      0.37128353879622916,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ],
+  "reference_meters_per_pixel": 2.0,
+  "dataset_revision": 1,
+  "reference_crop": {
+    "point": [
+      1023.2574329224076,
+      1024.0
+    ],
+    "image": "reference-crop.png",
+    "type": "public_image_crop_not_game_capture"
+  }
+}

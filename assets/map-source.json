@@ -1,0 +1,26 @@
+{
+  "reference": "public grayscale z5 tiles (development source); runtime uses ozeti-features.npz",
+  "reference_to_map": [
+    [
+      0.37331961113913387,
+      -2.9509909678317748e-05,
+      -1.9797825617832543
+    ],
+    [
+      2.9509909678317748e-05,
+      0.37331961113913387,
+      1.2693583946508524
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "registration_inliers": 2308,
+  "registration_error_px": 0.1663208905925605,
+  "reference_meters_per_pixel": 2.0,
+  "source": "https://assets.wardogs-artillery.com/releases/assets-v1/maps/tiles/ozeti",
+  "upstream": "https://github.com/apollyon-sys/wardogs-calculator",
+  "dataset_revision": 2
+}

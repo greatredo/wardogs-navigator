@@ -1,0 +1,131 @@
+import pytest
+from wardogs_nav.routing import Route
+from wardogs_nav.navigation import Navigator,cues_for,cue_text
+from wardogs_nav.model import default_settings
+
+
+def route(points):
+    from wardogs_nav.routing import distance
+    return Route(points,['major']*(len(points)-1),['r']*(len(points)-1),sum(distance(a,b) for a,b in zip(points,points[1:])),[0,0],0)
+
+
+def test_arrival_requires_two_end_fixes_and_roundtrip_reverses():
+    nav=Navigator();settings=default_settings();settings['arrival_m']=5
+    nav.start(route([[0,0],[100,0]]),[],settings,1,True)
+    nav.update([0,0],0);nav.update([50,0],1)
+    assert nav.update([99,0],2)['state']=='navigating'
+    data=nav.update([100,0],3);assert data['state']=='turnaround'
+    assert nav.route.points==[[100,0],[0,0]] and nav.lap==1
+    nav.update([100,0],4);nav.update([50,0],5);nav.update([0,0],6)
+    assert nav.update([0,0],7)['state']=='turnaround' and nav.lap==2
+
+
+def test_no_arrival_when_off_road_near_route_end():
+    nav=Navigator();settings=default_settings();settings['arrival_m']=5
+    nav.start(route([[0,0],[100,0]]),[],settings,1)
+    for t in range(3):assert nav.update([100,50],t)['state']!='arrived'
+
+
+def test_speech_is_deduplicated_and_lead_adjustable():
+    nav=Navigator();settings=default_settings();settings.update(lead_m=25,lead_s=0,arrival_m=5)
+    r=route([[0,100],[0,0],[100,0]]);r.junctions=[dict(at=100,delta=90)]
+    nav.start(r,[],settings,1)
+    assert nav.update([0,60],0)['speech']=='沿当前道路行驶60米'
+    assert nav.update([0,20],1)['speech']=='前方20米，路口右转'
+    assert nav.update([0,19],2)['speech'] is None
+    nav.stop();assert nav.update([0,0],3) is None
+
+
+def test_normal_curves_silent_but_physical_junctions_have_turn_and_straight():
+    from wardogs_nav.routing import plan
+    def road(id,points):return dict(id=id,points=points,kind='major',confirmed=True)
+    main=road('main',[[0,100],[0,50],[0,0],[100,0]])
+    smooth=plan([main],[[0,100],[100,0]],['major'])
+    assert [c.kind for c in cues_for(smooth,[],'normal')]==['arrival']
+    assert any(c.kind=='square_right' for c in cues_for(smooth,[],'wrc'))
+    with_junctions=plan([main,road('side',[[0,50],[70,50]]),road('out',[[0,0],[-50,0]])],[[0,100],[100,0]],['major'])
+    assert [c.kind for c in cues_for(with_junctions,[],'normal')]==['straight','right','arrival']
+    # Road-ID changes at a degree-two join are still the same continuous road.
+    split=plan([road('a',[[0,100],[0,0]]),road('b',[[0,0],[100,0]])],[[0,100],[100,0]],['major'])
+    assert [c.kind for c in cues_for(split,[],'normal')]==['arrival']
+
+
+def test_wrc_smooth_curve_is_one_note_and_grade_density_independent():
+    import math
+    def arc(step):return route([[100+100*math.cos(math.radians(i)),100+100*math.sin(math.radians(i))] for i in range(0,91,step)])
+    a=[c for c in cues_for(arc(1),[],'wrc') if c.kind!='arrival']
+    b=[c for c in cues_for(arc(5),[],'wrc') if c.kind!='arrival']
+    assert len(a)==len(b)==1
+    assert a[0].kind==b[0].kind=='right' and a[0].grade==b[0].grade
+
+
+def test_wrc_manual_brake_square_chain_modifiers_and_separate_timing():
+    nav=Navigator();settings=default_settings()
+    settings.update(mode='wrc',lead_m=5,lead_s=0,wrc_lead_m=70,wrc_lead_s=0,wrc_chain_m=60,arrival_m=5)
+    notes=[dict(id='brake',point=[80,0],type='hard_brake',grade=1,bearing=90,direction='both'),
+           dict(id='left',point=[100,0],type='left',grade=3,bearing=90,direction='both',modifiers=['dont_cut']),
+           dict(id='square',point=[130,0],type='square_right',grade=1,bearing=90,direction='both')]
+    nav.start(route([[0,0],[300,0]]),notes,settings,1)
+    assert nav.update([0,0],0)['speech'] is None
+    speech=nav.update([20,0],1)['speech']
+    assert '急刹车' in speech and '左三，别切' in speech and '右直角' in speech
+    assert nav.update([21,0],2)['speech'] is None
+    assert nav.update([100,0],5)['speech'] is None
+
+
+def test_after_junction_speaks_next_road_distance_and_reverse_turn():
+    r=route([[0,100],[0,0],[400,0]]);r.junctions=[dict(at=100,delta=90)]
+    nav=Navigator();settings=default_settings();settings.update(lead_m=30,lead_s=0)
+    nav.start(r,[],settings,1)
+    nav.update([0,20],0)
+    assert nav.update([15,0],1)['speech']=='沿当前道路行驶380米'
+    assert cues_for(r.reversed(),[],'normal')[0].kind=='left'
+
+
+def test_wrc_next_unspoken_note_can_play_before_passing_previous():
+    settings=default_settings();settings.update(mode='wrc',wrc_lead_m=100,wrc_lead_s=0,wrc_chain_m=0)
+    notes=[dict(id=id,point=[x,0],type=kind,grade=6,bearing=90,direction='both',lead_m=lead)
+           for id,x,kind,lead in [('one',200,'left',200),('two',240,'right',220)]]
+    nav=Navigator();nav.start(route([[0,0],[500,0]]),notes,settings,1)
+    assert '左六' in nav.update([0,0],0)['speech']
+    assert nav.update([1,0],1)['speech'] is None
+    assert '右六' in nav.update([25,0],2)['speech']
+
+
+def test_integer_timing_controls_survive_restart(tmp_path,monkeypatch):
+    from wardogs_nav.model import atomic_json,load_settings
+    monkeypatch.setenv('WARDOGS_NAV_DATA',str(tmp_path))
+    settings=default_settings();settings.update(lead_m=230,wrc_lead_m=320,wrc_chain_m=75,wrc_lead_s=6.5)
+    atomic_json(tmp_path/'settings.json',settings)
+    loaded=load_settings()
+    assert loaded['lead_m']==230 and loaded['wrc_lead_m']==320 and loaded['wrc_chain_m']==75 and loaded['wrc_lead_s']==6.5
+
+
+def test_manual_wrc_grade_overrides_estimate_and_reverses():
+    r=route([[0,100],[0,0],[100,0]])
+    note=dict(id='n',point=[0,0],type='right',grade=3,bearing=0,direction='both',lead_m=180,text='右三，别切',reverse_text='左三，别切')
+    forward=[c for c in cues_for(r,[note],'wrc') if c.id=='n'][0]
+    reverse=[c for c in cues_for(route(list(reversed(r.points))),[note],'wrc') if c.id=='n'][0]
+    assert forward.kind=='right' and forward.grade==3 and not forward.inferred
+    assert reverse.kind=='left' and reverse.text=='左三，别切'
+    assert forward.lead_m==180
+
+
+def test_directional_note_only_plays_in_requested_direction():
+    note=dict(id='n',point=[50,0],type='caution',grade=4,bearing=90,direction='forward')
+    assert any(c.id=='n' for c in cues_for(route([[0,0],[100,0]]),[note],'wrc'))
+    assert not any(c.id=='n' for c in cues_for(route([[100,0],[0,0]]),[note],'wrc'))
+
+
+def test_lost_fix_does_not_advance_or_retain_speed():
+    nav=Navigator();nav.start(route([[0,0],[100,0]]),[],default_settings(),1)
+    nav.update([0,0],0);nav.update([20,0],1);progress=nav.progress;nav.lost()
+    assert nav.progress==progress and nav.speed==0 and nav.last_point is None
+
+
+def test_offroute_waits_for_three_fixes():
+    nav=Navigator();settings=default_settings();settings['offroute_m']=20
+    nav.start(route([[0,0],[100,0]]),[],settings,1)
+    assert not nav.update([50,40],0).get('replan')
+    assert not nav.update([50,40],1).get('replan')
+    assert nav.update([50,40],2)['replan']

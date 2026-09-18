@@ -1,0 +1,29 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.npz binary
+LICENSE text eol=lf
+NOTICE text eol=lf
+
+/docs/实施记录.md export-ignore
+/AGENTS.md export-ignore
+/.codex export-ignore
+/.agents export-ignore
+/research export-ignore
+/backups export-ignore
+/0.png export-ignore
+/1.png export-ignore
+/2.png export-ignore
+/3.png export-ignore
+/OZETI*.png export-ignore
+/载具图标*.png export-ignore
+/assets/map.json export-ignore
+/tools/check_*.py export-ignore
+/tools/probe_*.py export-ignore
+/tools/smoke_*.py export-ignore
+/tools/prepare_assets.py export-ignore
+/tools/seed_roads.py export-ignore

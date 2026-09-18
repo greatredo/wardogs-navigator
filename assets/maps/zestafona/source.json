@@ -1,0 +1,53 @@
+{
+  "map": "zestafona",
+  "source": "https://assets.wardogs-artillery.com/releases/assets-v1/maps/tiles/zestafona",
+  "zoom": 5,
+  "crop": [
+    996,
+    1096,
+    6246,
+    5657
+  ],
+  "tileBounds": {
+    "minX": -0.03,
+    "maxX": 163.81,
+    "minY": -0.01,
+    "maxY": 163.83
+  },
+  "bounds": {
+    "minX": 19.9,
+    "maxX": 124.89,
+    "minY": 50.7,
+    "maxY": 141.9
+  },
+  "meters_per_pixel": 5.126953125,
+  "upstream": "https://github.com/apollyon-sys/wardogs-calculator",
+  "reference": "Public grayscale z5 tiles, cropped to configured play area",
+  "reference_to_map": [
+    [
+      0.3900952380952381,
+      0,
+      0
+    ],
+    [
+      0,
+      0.3900952380952381,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ],
+  "reference_meters_per_pixel": 2.0,
+  "dataset_revision": 1,
+  "reference_crop": {
+    "point": [
+      1024.0,
+      889.4171428571428
+    ],
+    "image": "reference-crop.png",
+    "type": "public_image_crop_not_game_capture"
+  }
+}

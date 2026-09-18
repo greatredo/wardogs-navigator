@@ -1,0 +1,6 @@
+opencv-python-headless==5.0.0.93
+numpy==2.5.3
+PySide6==6.11.2
+mss==10.2.0
+pyinstaller==6.22.3
+pytest==9.1.1
