@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 import pytest
-from wardogs_nav.vision import Locator,read_image
+from wardogs_nav.vision import Locator,read_image,player_heading
 from wardogs_nav.model import asset_path
 
 def minimap(center=(505,1245),span=136):
@@ -59,3 +59,26 @@ def test_southern_map_edge_is_not_masked_as_minimap_hud(locator):
     query=cv2.resize(im[1320:1446,1150:1300],None,fx=2,fy=2)
     fix=locator.locate(query)
     assert fix.valid and abs(fix.x-1225)<2 and abs(fix.y-1383)<2
+
+
+def test_self_intersecting_marker_keeps_terrain_fix(locator):
+    # Deterministic synthetic contour from BUG-20260919-001, not a player image.
+    polygon=np.int32([[157,175],[181,175],[159,159],[164,171],[164,173],
+                      [167,179],[159,181],[182,175],[178,166],[154,184],[163,155]])
+    image=minimap()
+    image[148:193,148:193]=(70,70,70)
+    cv2.fillPoly(image,[polygon],(255,255,255))
+    assert player_heading(image,(.5,.5)) is None
+    fix=locator.locate(image)
+    assert fix.valid and fix.heading is None and fix.inliers>=20
+    assert (fix.x,fix.y)==pytest.approx((505,1245),abs=2)
+    recovered=locator.locate(minimap())
+    assert recovered.valid and 35<recovered.heading<65
+
+
+@pytest.mark.parametrize('shape',['blank','line','convex'])
+def test_degenerate_or_non_arrow_marker_has_no_heading(shape):
+    image=np.zeros((340,340,3),np.uint8)
+    if shape=='line':cv2.line(image,(155,170),(185,170),(255,255,255),1)
+    if shape=='convex':cv2.rectangle(image,(164,164),(176,176),(255,255,255),-1)
+    assert player_heading(image,(.5,.5)) is None

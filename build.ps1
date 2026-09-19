@@ -9,8 +9,19 @@ $outputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) { [IO.Path]::GetFul
 if ($outputRoot -ne $distRoot -and -not $outputRoot.StartsWith($distRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '构建输出必须位于本项目 dist 目录内' }
 $packageRoot = Join-Path $outputRoot 'WardogsNavigator'
 if (-not (Test-Path -LiteralPath $python)) { throw '请先创建 .venv 并安装 requirements.txt' }
-& $python -m PyInstaller --noconfirm --clean --windowed --onedir --distpath $outputRoot --name WardogsNavigator --add-data 'assets;assets' --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets --exclude-module PySide6.QtWebEngineQuick main.py
-if ($LASTEXITCODE -ne 0) { throw 'PyInstaller 构建失败' }
+# Foreign tools on PATH can supply incompatible DLLs with Windows system names
+# (notably icuuc.dll). Resolve native dependencies only from Python and Windows.
+$pythonBase = & $python -c 'import sys; print(sys.base_prefix)'
+if ($LASTEXITCODE -ne 0) { throw '无法确定 Python 运行环境' }
+$previousBuildPath = $env:PATH
+try {
+    $env:PATH = @((Split-Path -Parent $python), $pythonBase,
+        (Join-Path $env:SystemRoot 'System32'), $env:SystemRoot) -join [IO.Path]::PathSeparator
+    & $python -m PyInstaller --noconfirm --clean --windowed --onedir --distpath $outputRoot --name WardogsNavigator --add-data 'assets;assets' --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets --exclude-module PySide6.QtWebEngineQuick main.py
+    if ($LASTEXITCODE -ne 0) { throw 'PyInstaller 构建失败' }
+} finally {
+    $env:PATH = $previousBuildPath
+}
 Copy-Item -LiteralPath 'README.md' -Destination (Join-Path $packageRoot '使用说明.md') -Force
 Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination (Join-Path $packageRoot 'THIRD_PARTY_NOTICES.md') -Force
 Copy-Item -LiteralPath 'LICENSE' -Destination (Join-Path $packageRoot 'LICENSE') -Force

@@ -2,30 +2,45 @@
 import json
 import time
 import os
+import cv2
+import numpy as np
 from pathlib import Path
 from dataclasses import asdict
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimer,QPointF
 from .model import asset_path,read_project,atomic_json,validate_project
-from .vision import Locator,read_image
+from .vision import Locator,read_image,Fix
 from .routing import plan,blocked
 from .navigation import Navigator,cues_for
 from .library import saved_route,supplement_roads,library_payload,merge_library,snap_saved,follow_saved
 from .app import MainWindow,STYLE
 from .maps import map_info,map_asset
+from . import __version__
 
 
 def run_selftest(output):
     output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)
     os.environ.setdefault('WARDOGS_NAV_DATA',str(output.parent/(output.stem+'-data')))
     app=QApplication.instance() or QApplication([]);app.setStyle('Fusion');app.setStyleSheet(STYLE)
-    report={'version':'0.5.3','game_test':False,'checks':{},'errors':[]}
+    report={'version':__version__,'game_test':False,'checks':{},'errors':[]}
     window=None
     try:
         p=read_project(asset_path('default_project.json'))
-        fix=Locator.from_assets().locate(read_image(asset_path('sample_minimap.png')))
+        locator=Locator.from_assets()
+        sample=read_image(asset_path('sample_minimap.png'))
+        fix=locator.locate(sample)
         report['localization']=asdict(fix);assert fix.valid
         report['checks']['image_localization']=True
+        terrain=read_image(map_asset('ozeti','image'))
+        ambiguous=cv2.resize(terrain[1177:1313,437:573],(340,340))
+        ambiguous[148:193,148:193]=(70,70,70)
+        polygon=np.int32([[157,175],[181,175],[159,159],[164,171],[164,173],
+                          [167,179],[159,181],[182,175],[178,166],[154,184],[163,155]])
+        cv2.fillPoly(ambiguous,[polygon],(255,255,255))
+        degraded=locator.locate(ambiguous)
+        report['heading_degradation']=asdict(degraded)
+        report['checks']['ambiguous_heading_keeps_position']=(degraded.valid and degraded.heading is None
+            and abs(degraded.x-505)<2 and abs(degraded.y-1245)<2)
         route=plan(p['roads'],[[fix.x,fix.y],[1300,796]],['major','minor'])
         report['checks']['routing']=len(route.points)>5
         danger={'shape':'rect','point':[1152,789],'width':14,'height':14}
@@ -37,6 +52,16 @@ def run_selftest(output):
         window.plan_route(quiet=True);window.refresh_lists();window.show();app.processEvents();window.map.fit()
         window.grab().save(str(output.with_suffix('.png')))
         report['checks']['gui']=True
+        window.worker.capture=True;window.on_fix(fix,sample,True)
+        window.fix_time=time.monotonic()-3;window.check_stale()
+        report['checks']['stale_fix_clears_ui']=(not window.fix.valid and not window.fix_live
+            and window.map.player_item is None and '100%' not in window.fix_label.text())
+        window.on_fix(Fix(reason='合成单帧异常'),ambiguous,True)
+        window.on_fix(fix,sample,True)
+        report['checks']['failure_frame_retained_after_recovery']=(window.fix_live
+            and np.array_equal(window.failure_diagnostic[0],ambiguous)
+            and not window.failure_diagnostic[1]['fix']['valid'])
+        window.worker.capture=False
         window.store_favorite(saved_route('打包验收路线',route));window.favorite_list.setCurrentRow(0);window.load_favorite()
         report['checks']['exact_favorite']=abs(window.route.length-route.length)<.1
         payload=library_payload(window.project,'routes');portable=output.with_name(output.stem+'-routes.json')

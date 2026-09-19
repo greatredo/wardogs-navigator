@@ -63,9 +63,18 @@ def player_heading(image, anchor):
     origin = center(contour)
     if np.linalg.norm(origin - [cx, cy]) > min(h, w)*.12:
         return None
-    polygon = cv2.approxPolyDP(contour, .025*cv2.arcLength(contour, True), True)
-    hull = cv2.convexHull(polygon, returnPoints=False)
-    defects = cv2.convexityDefects(polygon, hull) if len(hull) >= 3 and len(polygon) > len(hull) else None
+    try:
+        polygon = cv2.approxPolyDP(contour, .025*cv2.arcLength(contour, True), True)
+        if len(polygon) < 4:
+            return None
+        hull = cv2.convexHull(polygon, returnPoints=False)
+        if hull is None or len(hull) < 3 or len(hull) >= len(polygon):
+            return None
+        defects = cv2.convexityDefects(polygon, hull)
+    except cv2.error:
+        # Touching icons can produce self-intersections or invalid hull indices.
+        # Heading is optional: this must not discard a valid terrain match.
+        return None
     if defects is None:
         return None
     defect = max(defects.reshape(-1, 4), key=lambda d: d[3])
