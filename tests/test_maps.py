@@ -139,7 +139,9 @@ def test_new_map_assets_match_their_coordinate_frame(mid):
 
 
 @pytest.mark.parametrize('mid,anchors',[
-    ('bakurani',[[311,968],[1190,1803],[1771,1090],[1449,144]]),
+    # The maintained road data removed the old southern-camp connector;
+    # exercise the remaining southern road endpoint instead of that deleted road.
+    ('bakurani',[[311,968],[1206.5,1741.5],[1771,1090],[1449,144]]),
     ('zestafona',[[362,278],[1269,822],[1016,1669],[1800,1310]]),
 ])
 def test_new_map_main_roads_connect_and_favorites_keep_geometry(mid,anchors):

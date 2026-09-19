@@ -106,7 +106,7 @@ class MainWindow(QMainWindow):
         self.minimap_overlay.mask_changed.connect(lambda mask:setattr(self.worker,'path_mask',mask))
         self.hud.changed.connect(self.save_settings)
         self.build_ui()
-        self.setWindowTitle('WARDOGS Navigator 0.5.2 · '+map_info(self.project['map'])['name'])
+        self.setWindowTitle('WARDOGS Navigator 0.5.3 · '+map_info(self.project['map'])['name'])
         self.setWindowFlag(Qt.WindowStaysOnTopHint,self.settings['main_topmost'])
         self.refresh_lists()
         self.refresh_map()
@@ -346,7 +346,7 @@ class MainWindow(QMainWindow):
         self.preview.clear();self.preview.setText('开启定位后显示当前地图的小地图预览')
         self.fix_label.setText('尚未定位');self.fix_detail.setText('已切换地图，正在准备对应的定位特征。')
         self.route_label.setText('路线尚未规划');self.coordinate_label.setText('地图坐标 —')
-        name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator 0.5.2 · '+name)
+        name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator 0.5.3 · '+name)
         self.save_settings();self.notify(f'已切换到 {name}；道路、收藏和路书已载入。开启定位后重新开始导航。')
         return True
 
