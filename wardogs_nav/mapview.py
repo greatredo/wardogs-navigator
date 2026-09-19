@@ -54,6 +54,7 @@ class MapView(QGraphicsView):
         self.scene().setSceneRect(0,0,self.pixmap.width(),self.pixmap.height())
         self.project = None
         self.route = None
+        self.full_route = None
         self.fix = None
         self.selected_road = None
         self.draft = []
@@ -71,7 +72,7 @@ class MapView(QGraphicsView):
         pixmap=QPixmap(str(map_asset(map_id,'image')))
         if pixmap.isNull():raise ValueError('地图底图缺失或无法读取')
         self.pixmap=pixmap
-        self.selected_road=None;self.draft=[];self.draft_path=[];self.fix=None;self.route=None
+        self.selected_road=None;self.draft=[];self.draft_path=[];self.fix=None;self.route=None;self.full_route=None
         self.danger_start=None;self.press=None;self.set_tool('pan')
         self.scene().setSceneRect(0,0,pixmap.width(),pixmap.height())
         self.redraw();self.fit()
@@ -118,6 +119,7 @@ class MapView(QGraphicsView):
             if isinstance(item, Handle):
                 key=item.key
                 menu.addAction('删除此点 / 标注', lambda:self.remove_requested.emit(key))
+            menu.addAction('在此设置起始点 / 返程终点', lambda:self._context('start',p))
             menu.addAction('在此设置目的地', lambda:self._context('destination',p))
             menu.addAction('在此添加途经点', lambda:self._context('waypoint',p))
             menu.addAction('在此添加路书', lambda:self._context('note',p))
@@ -239,6 +241,8 @@ class MapView(QGraphicsView):
             item.setZValue(5)
             self.handle(zone['point'],'#e47878',('avoid',i))
             self.label('避让',zone['point'],'#ffb0b0')
+        if self.full_route:
+            self.line(self.full_route.points,QColor(103,237,195,85),5,z=7)
         if self.route:
             self.line(self.route.points,'#102d2b',9,z=8)
             self.line(self.route.points,'#59e1bf',5,z=9)
@@ -249,10 +253,14 @@ class MapView(QGraphicsView):
                     continue
                 p=((a[0]+b[0])/2,(a[1]+b[1])/2)
                 self.label('·',p,'#ffffff')
+        start=self.project.get('start')
+        if start:
+            self.handle(start,'#83baff',('start',0))
+            self.label('起点 / 返程终点' if self.project['roundtrip'] else '起点',start,'#a7ceff')
         destination=self.project.get('destination')
         if destination:
             self.handle(destination,'#f2cf75',('destination',0))
-            self.label('终点',destination,'#ffe5a1')
+            self.label('去程终点' if self.project['roundtrip'] else '终点',destination,'#ffe5a1')
         for i,p in enumerate(self.project['waypoints']):
             self.handle(p,'#57dfbf',('waypoint',i))
             self.label(str(i+1),p,'#adf6e2')

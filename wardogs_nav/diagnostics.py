@@ -146,18 +146,28 @@ def run_selftest(output):
             window.hud.grab().save(str(output.with_name(output.stem+'-hud.png')))
             window.settings['hud']['locked']=True;window.hud.apply_settings()
             report['checks']['hud_mouse_passthrough_flag']=bool(window.hud.windowFlags() & __import__('PySide6.QtCore',fromlist=['Qt']).Qt.WindowTransparentForInput)
-            window.navigator.start(window.route,[],window.settings,window.project['meters_per_pixel'],False)
             window.fix_live=True;window.fix_time=time.monotonic();window.settings['capture']=dict(left=75,top=75,width=340,height=303)
+            # Loading a favorite above already populated its endpoints. Exercise
+            # automatic placement only with the required unset-start condition.
+            window.project['start']=None
+            window.begin_navigation()
+            report['checks']['automatic_start_visible']=(window.project['start']==[window.fix.x,window.fix.y]
+                and '返程终点' in window.start_label.text() and window.full_route is not None)
             window.update_minimap_overlay();app.processEvents()
             report['checks']['minimap_path_visible']=window.minimap_overlay.isVisible()
             report['checks']['path_capture_mask']=bool(window.worker.path_mask)
             report['checks']['minimap_mouse_passthrough_flag']=bool(window.minimap_overlay.windowFlags() & __import__('PySide6.QtCore',fromlist=['Qt']).Qt.WindowTransparentForInput)
             report['minimap_capture_excluded']=window.minimap_overlay.capture_excluded
+            full_points=list(window.minimap_overlay.full_points)
+            window.navigator.progress=window.route.length*.25;window.update_minimap_overlay()
+            report['checks']['remaining_minimap_path']=(window.minimap_overlay.full_points==full_points
+                and window.minimap_overlay.points[0]!=full_points[0]
+                and len(window.worker.path_mask['paths'])==2)
             window.minimap_overlay.grab().save(str(output.with_name(output.stem+'-minimap-path.png')))
             window.clear_current_route();app.processEvents()
-            report['checks']['clear_current_route']=(window.project['destination'] is None and not window.project['waypoints'] and not window.project.get('active_route_id')
+            report['checks']['clear_current_route']=(window.project['start'] is None and window.project['destination'] is None and not window.project['waypoints'] and not window.project.get('active_route_id')
                 and window.route is None and window.map.route is None and not window.navigator.active and not window.pending_start
-                and not window.minimap_overlay.isVisible() and window.worker.path_mask is None and not window.hud.isVisible())
+                and not window.minimap_overlay.isVisible() and window.worker.path_mask is None and window.hud.isVisible())
             window.grab().save(str(output.with_name(output.stem+'-cleared.png')))
             window.navigator.stop();window.watchdog.stop()
             # Exercise the production speech queue through the native SAPI
