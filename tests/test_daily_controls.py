@@ -69,14 +69,14 @@ def test_clear_buttons_preserve_other_data_and_can_undo(window,app,key,location)
 
 def test_clear_danger_replans_running_navigation_and_preserves_roundtrip(window,app):
     window.fix=Fix(x=505,y=1245,confidence=1,valid=True)
-    window.fix_live=True;window.home=[505,1245]
+    window.fix_live=True;window.project['start']=[505,1245]
     window.project['destination']=[1300,796];window.project['roundtrip']=True
     window.project['avoid']=[dict(shape='rect',point=[1152,789],width=14,height=14)]
     window.refresh_lists();assert window.plan_route()
     window.navigator.start(window.route,[],window.settings,window.project['meters_per_pixel'],True)
     window.clear_annotations('avoid')
     assert window.project['avoid']==[] and window.navigator.active
-    assert window.navigator.roundtrip and window.home==[505,1245]
+    assert window.navigator.roundtrip and window.project['start']==[505,1245]
     assert window.project['destination']==[1300,796]
 
 
@@ -92,7 +92,7 @@ def test_clear_is_saved_per_map(window):
 
 
 @pytest.mark.parametrize('location',['navigation','toolbar'])
-@pytest.mark.parametrize('state',['navigating','stopped','waiting'])
+@pytest.mark.parametrize('state',['navigating','stopped','waiting','hidden'])
 def test_clear_current_route_ends_trip_without_losing_saved_data(window,app,monkeypatch,location,state):
     window.fix=Fix(x=505,y=1245,scale=.4,confidence=1,valid=True)
     window.fix_live=True;window.fix_time=time.monotonic();window.worker.capture=True
@@ -104,7 +104,7 @@ def test_clear_current_route_ends_trip_without_losing_saved_data(window,app,monk
     window.project['waypoints']=[list(window.route.points[len(window.route.points)//2])]
     window.project['destinations']=[dict(name='保留的目的地',point=[1300,796])]
     window.project['avoid']=[dict(shape='rect',point=[450,700],width=30,height=30)]
-    window.project['roundtrip']=True;window.home=[505,1245]
+    window.project['roundtrip']=True;window.project['start']=[505,1245]
     window.navigator.start(window.route,[],window.settings,window.project['meters_per_pixel'],True)
     window.navigator.lap=1;window.navigator.leg='返程'
     window.hud.show();window.update_minimap_overlay();window.refresh_lists();app.processEvents()
@@ -113,29 +113,30 @@ def test_clear_current_route_ends_trip_without_losing_saved_data(window,app,monk
         window.stop_navigation(quiet=True)
         assert window.route and window.map.route  # The reported stopped preview.
     if state=='waiting':window.pending_start=True
+    if state=='hidden':window.hud.hide()
     before=deepcopy(window.project);stops=[];spoken=[]
     monkeypatch.setattr(window.tts,'stop',lambda:stops.append(True))
     monkeypatch.setattr(window,'speak',spoken.append)
     button=window.findChild(QPushButton,'clear_current_route_'+location)
     if location=='navigation':window.tabs.widget(0).ensureWidgetVisible(button)
     QTest.mouseClick(button,Qt.LeftButton);app.processEvents()
-    expected=deepcopy(before);expected['destination']=None;expected['waypoints']=[]
+    expected=deepcopy(before);expected['start']=None;expected['destination']=None;expected['waypoints']=[]
     expected.pop('active_route_id');expected.pop('active_route_reverse')
     assert window.project==expected and stops
     assert not window.navigator.active and not window.pending_start
     assert window.route is None and window.map.route is None
-    assert window.home is None and window.favorite_trip is None
-    assert not window.hud.isVisible() and 'cue' not in window.hud.data
+    assert window.project['start'] is None and window.favorite_trip is None
+    assert window.hud.isVisible()==(state!='hidden') and 'cue' not in window.hud.data
     assert not window.minimap_overlay.isVisible() and not window.minimap_overlay.points
     assert window.worker.path_mask is None
     assert '清除' in window.route_label.text() and '选择' in window.route_label.text()
     # An already queued camera result must not restart the cleared journey.
     window.on_fix(Fix(x=505,y=1245,scale=.4,confidence=1,valid=True),window.frame,True)
     assert not window.navigator.active and window.route is None and not spoken
-    assert not window.minimap_overlay.isVisible() and not window.hud.isVisible()
+    assert not window.minimap_overlay.isVisible() and window.hud.isVisible()==(state!='hidden')
     QTest.qWait(650)
     restored=read_project(project_path('ozeti'))
-    assert restored['destination'] is None and restored['waypoints']==[]
+    assert restored['start'] is None and restored['destination'] is None and restored['waypoints']==[]
     assert not restored.get('active_route_id') and restored['route_library']==[saved]
     window.undo();app.processEvents()
     assert window.project==before and window.route is not None
@@ -163,4 +164,4 @@ def test_clearing_empty_route_does_not_add_undo_steps_and_new_trip_can_start(win
     window.fix=Fix(x=505,y=1245,scale=.4,confidence=1,valid=True)
     window.project['destination']=[194,211];window.begin_navigation()
     assert window.navigator.active and window.route
-    assert window.home==[505,1245] and window.navigator.lap==0
+    assert window.project['start']==[505,1245] and window.navigator.lap==0

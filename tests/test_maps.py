@@ -63,12 +63,12 @@ def test_switch_stops_navigation_and_discards_inflight_results_even_after_return
     window.fix=Fix(x=505,y=1245,valid=True);window.fix_live=True
     window.project['destination']=[1300,796];assert window.plan_route()
     window.navigator.start(window.route,[],window.settings,window.project['meters_per_pixel'])
-    window.pending_start=True;window.home=[505,1245];window.worker.capture=True
+    window.pending_start=True;window.project['start']=[505,1245];window.worker.capture=True
     window.worker.path_mask={'points':[[1,2],[3,4]],'width':4}
     window.set_tool('road');window.map.draft=[[500,500]];window.snapshot()
     assert window.switch_map('bakurani')
     assert not window.navigator.active and not window.worker.capture and not window.pending_start
-    assert window.fix is None and window.route is None and window.home is None and window.frame is None
+    assert window.fix is None and window.route is None and window.project['start'] is None and window.frame is None
     assert not window.map.draft and not window.history and window.worker.path_mask is None
     assert not window.minimap_overlay.isVisible()
     assert window.switch_map('ozeti')

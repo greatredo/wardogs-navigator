@@ -6,6 +6,7 @@ import sys
 from PySide6.QtCore import Qt, QPointF,Signal
 from PySide6.QtGui import QPainter, QPainterPath, QPen, QColor
 from PySide6.QtWidgets import QWidget, QApplication
+from .routing import remaining_points
 
 
 def native_windows():
@@ -48,13 +49,15 @@ class MinimapOverlay(QWidget):
     mask_changed=Signal(object)
     def __init__(self,settings):
         super().__init__()
-        self.settings=settings;self.points=[];self.frame_size=(1,1);self.capture_excluded=None
+        self.settings=settings;self.points=[];self.full_points=[];self.frame_size=(1,1);self.capture_excluded=None
         self.setWindowFlags(Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint|Qt.Tool|Qt.WindowTransparentForInput|Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground);self.setAttribute(Qt.WA_ShowWithoutActivating)
 
-    def update_route(self,route,fix,frame_size,anchor,region):
-        self.points=project_to_minimap(route.points,fix,frame_size,anchor) if route else []
-        if not self.settings['enabled'] or not self.points:self.hide();return
+    def update_route(self,route,fix,frame_size,anchor,region,*,full_route=None,progress=0.):
+        full_route=full_route or route
+        self.full_points=project_to_minimap(full_route.points,fix,frame_size,anchor) if full_route else []
+        self.points=project_to_minimap(remaining_points(route,progress),fix,frame_size,anchor)
+        if not self.settings['enabled'] or not self.full_points:self.hide();return
         self.frame_size=frame_size
         # DWM must have a shown top-level surface before applying affinity.
         self.setWindowOpacity(float(self.settings['opacity']))
@@ -65,7 +68,7 @@ class MinimapOverlay(QWidget):
         # including its outline, so navigation remains usable in that case.
         if native_windows():keep_on_top(self,region)
         else:self.setGeometry(region['left'],region['top'],region['width'],region['height'])
-        self.mask_changed.emit((list(self.points),self.settings['line_width']))
+        self.mask_changed.emit({'paths':[list(self.full_points),list(self.points)],'width':self.settings['line_width']})
         self.update()
 
     def hideEvent(self,event):
@@ -73,11 +76,14 @@ class MinimapOverlay(QWidget):
         super().hideEvent(event)
 
     def paintEvent(self,event):
-        if len(self.points)<2:return
+        if len(self.full_points)<2:return
         p=QPainter(self);p.setRenderHint(QPainter.Antialiasing)
         p.scale(self.width()/self.frame_size[0],self.height()/self.frame_size[1])
-        path=QPainterPath(QPointF(*self.points[0]))
-        for xy in self.points[1:]:path.lineTo(*xy)
         width=float(self.settings['line_width'])
-        p.setPen(QPen(QColor(8,25,27,210),width+2,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(path)
-        p.setPen(QPen(QColor('#67edc3'),width,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(path)
+        for points,outline,color in ((self.full_points,QColor(8,25,27,90),QColor(103,237,195,85)),
+                                     (self.points,QColor(8,25,27,210),QColor('#67edc3'))):
+            if len(points)<2:continue
+            path=QPainterPath(QPointF(*points[0]))
+            for xy in points[1:]:path.lineTo(*xy)
+            p.setPen(QPen(outline,width+2,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(path)
+            p.setPen(QPen(color,width,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(path)
