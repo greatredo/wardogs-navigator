@@ -147,12 +147,12 @@ class RegionCanvas(QWidget):
 
 
 class RegionDialog(QDialog):
-    def __init__(self,frame,monitor,parent=None):
-        super().__init__(parent);self.setWindowTitle('框选小地图 · 只包含地图画面，尽量让玩家箭头居中')
+    def __init__(self,frame,monitor,parent=None,*,large=False):
+        super().__init__(parent);self.setWindowTitle('框选大地图 · 只包含地图画面' if large else '框选小地图 · 只包含地图画面，尽量让玩家箭头居中')
         self.resize(1120,740);self.monitor=monitor;self.region=None
         rgb=frame[:,:,::-1].copy();h,w=rgb.shape[:2]
         image=QImage(rgb.data,w,h,rgb.strides[0],QImage.Format_RGB888).copy()
-        layout=QVBoxLayout(self);layout.addWidget(QLabel('拖动框选左下角小地图。数值使用屏幕物理像素，可兼容 DPI 缩放。'))
+        layout=QVBoxLayout(self);layout.addWidget(QLabel(('拖动框选游戏中央的大地图，不含边框、坐标刻度与操作说明。' if large else '拖动框选左下角小地图。')+'数值使用屏幕物理像素，可兼容 DPI 缩放。'))
         self.canvas=RegionCanvas(image);self.canvas.selected.connect(self.select);layout.addWidget(self.canvas,1)
         self.label=QLabel('尚未选择区域');layout.addWidget(self.label)
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);self.ok=buttons.button(QDialogButtonBox.Ok);self.ok.setEnabled(False)

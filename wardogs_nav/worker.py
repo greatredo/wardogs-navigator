@@ -2,13 +2,15 @@ import threading
 import time
 import numpy as np
 from PySide6.QtCore import QThread, Signal
-from .vision import Locator, read_image, Fix
+from .vision import Locator, read_image, Fix, MapViewFix
+from .hotkeys import foreground_window
 
 
 class CaptureWorker(QThread):
     result=Signal(object,object,bool)
     ready=Signal(str,int)
     failed=Signal(str,str,int)
+    map_result=Signal(object,object,object)
 
     def __init__(self, settings):
         super().__init__()
@@ -16,20 +18,35 @@ class CaptureWorker(QThread):
         self.capture=False
         self.sample=None
         self.path_mask=None
+        self.map_mask=None
+        self.mode='idle'
+        self.session=0
+        self.map_action=None
+        self.target_window=0
         self.context=(settings.get('map_id','ozeti'),0)
         self.wake=threading.Event()
 
     def request_map(self,map_id):
+        self.reset_view()
         self.capture=False;self.sample=None;self.path_mask=None
         self.context=(map_id,self.context[1]+1)
         self.wake.set()
 
+    def reset_view(self):
+        self.session+=1;self.mode='idle';self.map_action=None;self.map_mask=None;self.target_window=0
+        self.wake.set()
+
+    def request_action(self,action,point,foreground):
+        self.map_action=(self.session,action,point,foreground,time.monotonic())
+        self.wake.set()
+
     def request_sample(self,path):
+        self.reset_view()
         self.sample=(self.context,str(path))
         self.wake.set()
 
     def run(self):
-        grabber=None;locator=None;loaded=None
+        grabber=None;locator=None;loaded=None;view_session=None
         while not self.isInterruptionRequested():
             context=self.context
             if loaded!=context or (locator is None and self.capture):
@@ -50,6 +67,10 @@ class CaptureWorker(QThread):
             elif sample:continue
             live=self.capture and sample is None
             if locator is not None and (sample or live):
+                session=self.session
+                if view_session!=session:
+                    locator.map_reference=None;view_session=session
+                action=self.map_action;self.map_action=None
                 frame=None
                 try:
                     if sample:
@@ -76,10 +97,41 @@ class CaptureWorker(QThread):
                         grabber=None
                 # A failed frame is a result too. Keep its image (or explicit
                 # absence) paired with the error, and retry at the normal pace.
-                if context!=self.context or (live and not self.capture):continue
+                if context!=self.context or session!=self.session or (live and not self.capture):continue
                 fix.map_id,fix.generation=context
+                fix.session=session
+                if live and (fix.valid or self.mode!='big'):self.mode='mini' if fix.valid else 'searching'
                 self.result.emit(fix,frame,live)
-            self.wake.wait(max(.2,self.settings['interval_ms']/1000))
+                if live and fix.valid:
+                    locator.map_reference=None
+                    # No big-map capture, matching, foreground or cursor queries.
+                elif live and self.settings.get('bigmap',{}).get('enabled'):
+                    view=MapViewFix();big_frame=None
+                    region=dict(self.settings['bigmap_capture'])
+                    foreground=foreground_window();captured=time.monotonic()
+                    try:
+                        if self.target_window and foreground!=self.target_window:
+                            view.reason='游戏不在前台'
+                        elif region['width']<60 or region['height']<60:
+                            view.reason='大地图区域至少为 60 × 60 像素'
+                        else:
+                            if grabber is None:
+                                import mss
+                                grabber=mss.MSS()
+                            big_frame=np.asarray(grabber.grab(region))[:,:,:3].copy()
+                            view=locator.locate_map(big_frame,self.map_mask)
+                            if foreground_window()!=foreground:view.valid=False;view.reason='前台窗口已切换'
+                    except Exception as error:
+                        view=MapViewFix(reason=f'大地图截图或识别失败：{error}')
+                    if context!=self.context or session!=self.session or not self.capture:continue
+                    if region!=self.settings['bigmap_capture'] or not self.settings['bigmap']['enabled']:continue
+                    view.map_id,view.generation=context
+                    view.session=session;view.captured_at=captured;view.region=region;view.foreground=foreground
+                    self.mode='big' if view.valid else 'lost'
+                    # A hotkey is resolved against a NEW frame, never a cached transform.
+                    if action and (action[0]!=session or action[3]!=foreground or captured-action[4]>3):action=None
+                    self.map_result.emit(view,big_frame,action)
+            self.wake.wait(.2 if self.mode=='big' else max(.2,self.settings['interval_ms']/1000))
             self.wake.clear()
         if grabber:
             grabber.close()
