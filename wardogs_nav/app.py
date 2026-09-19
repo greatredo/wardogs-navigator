@@ -1,5 +1,6 @@
 from __future__ import annotations
 from copy import deepcopy
+from dataclasses import asdict,replace
 from pathlib import Path
 import json
 import math
@@ -14,6 +15,7 @@ from PySide6.QtTextToSpeech import QTextToSpeech
 from .model import (asset_path,user_dir,atomic_json,default_settings,load_settings,read_project,
                     validate_project,upgrade_road_data,uid,KINDS,NOTE_TYPES)
 from .vision import Fix
+from . import __version__
 from .routing import plan,RouteError,distance,bearing,nearest_on_route
 from .navigation import Navigator, cues_for, cue_text, distance_text
 from .library import saved_route,supplement_roads,follow_saved,library_payload,merge_library,snap_saved,check_library_target
@@ -89,6 +91,8 @@ class MainWindow(QMainWindow):
         self.last_accepted=None
         self.last_accepted_time=0.
         self.frame=None
+        self.frame_diagnostic=None
+        self.failure_diagnostic=None
         self.home=None
         self.favorite_trip=None
         self.draft_kinds=[]
@@ -106,7 +110,7 @@ class MainWindow(QMainWindow):
         self.minimap_overlay.mask_changed.connect(lambda mask:setattr(self.worker,'path_mask',mask))
         self.hud.changed.connect(self.save_settings)
         self.build_ui()
-        self.setWindowTitle('WARDOGS Navigator 0.5.3 · '+map_info(self.project['map'])['name'])
+        self.setWindowTitle('WARDOGS Navigator '+__version__+' · '+map_info(self.project['map'])['name'])
         self.setWindowFlag(Qt.WindowStaysOnTopHint,self.settings['main_topmost'])
         self.refresh_lists()
         self.refresh_map()
@@ -285,7 +289,7 @@ class MainWindow(QMainWindow):
         self.north_up=QCheckBox('小地图固定北朝上');self.north_up.setChecked(self.settings['north_up']);self.north_up.toggled.connect(lambda v:self.set_setting('north_up',v));capture.addWidget(self.north_up)
         self.preview=QLabel('定位时显示截取预览');self.preview.setAlignment(Qt.AlignCenter);self.preview.setMinimumHeight(140);capture.addWidget(self.preview)
         capture.addWidget(self.button('用图片检验定位',self.test_image))
-        capture.addWidget(self.button('保存当前定位诊断',self.save_capture_diagnostic))
+        capture.addWidget(self.button('保存定位诊断',self.save_capture_diagnostic))
         overlay=self.group('置顶与小地图路径',layout)
         topmost=QCheckBox('主窗口置顶');topmost.setChecked(self.settings['main_topmost']);topmost.toggled.connect(self.set_main_topmost);overlay.addWidget(topmost)
         self.overlay_check=QCheckBox('在游戏小地图上叠加路径');self.overlay_check.setChecked(self.settings['minimap_overlay']['enabled']);self.overlay_check.toggled.connect(lambda v:self.overlay_setting('enabled',v));overlay.addWidget(self.overlay_check)
@@ -337,6 +341,7 @@ class MainWindow(QMainWindow):
         self.worker.request_map(map_id)
         self.settings['map_id']=map_id;self.project=target;self.history=[]
         self.route=None;self.favorite_trip=None;self.home=None;self.frame=None
+        self.frame_diagnostic=None;self.failure_diagnostic=None
         self.fix=None;self.fix_live=False;self.fix_time=0.;self.pending_start=False
         self.last_accepted=None;self.last_accepted_time=0.;self.jump_candidate=None;self.jump_count=0
         self.navigator=Navigator();self.calibration_points=[];self.draft_kinds=[]
@@ -346,7 +351,7 @@ class MainWindow(QMainWindow):
         self.preview.clear();self.preview.setText('开启定位后显示当前地图的小地图预览')
         self.fix_label.setText('尚未定位');self.fix_detail.setText('已切换地图，正在准备对应的定位特征。')
         self.route_label.setText('路线尚未规划');self.coordinate_label.setText('地图坐标 —')
-        name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator 0.5.3 · '+name)
+        name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator '+__version__+' · '+name)
         self.save_settings();self.notify(f'已切换到 {name}；道路、收藏和路书已载入。开启定位后重新开始导航。')
         return True
 
@@ -823,9 +828,11 @@ class MainWindow(QMainWindow):
     def toggle_capture(self):
         self.worker.capture=not self.worker.capture
         if self.worker.capture:
+            self.failure_diagnostic=None
             self.worker.wake.set();self.capture_button.setText('关闭定位');self.notify('正在读取指定区域；请让游戏小地图保持可见')
         else:
-            self.capture_button.setText('开启定位');self.stop_navigation(quiet=True);self.fix_live=False;self.navigator.lost();self.set_hud({'state':'idle','text':'定位已关闭'})
+            self.stop_navigation(quiet=True);self.invalidate_fix('定位已关闭')
+            self.fix_label.setText('定位已关闭');self.set_hud({'state':'idle','text':'定位已关闭'})
 
     def start_navigation(self):
         if not self.project['destination']:self.notify('请先选择目的地');return
@@ -853,15 +860,37 @@ class MainWindow(QMainWindow):
 
     def worker_error(self,text,map_id=None,generation=0):
         if map_id is not None and ((map_id,generation)!=self.worker.context or map_id!=self.project['map']):return
+        self.fix=Fix(reason=text,map_id=self.worker.context[0],generation=self.worker.context[1])
+        self.remember_frame(self.fix,None,'worker_error')
+        self.invalidate_fix(text);self.notify(text)
+
+    def invalidate_fix(self,reason):
+        self.fix_live=False
+        self.fix=replace(self.fix,valid=False,reason=reason) if self.fix else Fix(reason=reason)
+        self.map.update_fix(self.fix)
         self.minimap_overlay.hide()
-        self.fix_live=False;self.capture_button.setText('开启定位');self.navigator.lost();self.tts.stop();self.set_hud({'state':'lost','text':'定位暂不可用'});self.notify(text)
+        self.capture_button.setText('关闭定位' if self.worker.capture else '开启定位')
+        self.fix_label.setText('定位丢失 · 已暂停播报');self.fix_detail.setText(reason)
+        self.navigator.lost();self.tts.stop();self.set_hud({'state':'lost','text':'定位丢失'})
+
+    def remember_frame(self,fix,frame,source):
+        self.frame=frame
+        self.frame_diagnostic=(frame,{'version':__version__,'source':source,'received_at':time.time(),
+            'frame_available':frame is not None,'fix':asdict(fix),
+            'capture':deepcopy(self.settings['capture']),'anchor':list(self.settings['anchor']),
+            'north_up':self.settings['north_up']})
+        if not fix.valid:self.failure_diagnostic=self.frame_diagnostic
+        if frame is None:
+            self.preview.clear();self.preview.setText('本次未取得截图；可保存错误诊断 JSON')
+        else:
+            rgb=frame[:,:,::-1].copy();h,w=rgb.shape[:2];image=QImage(rgb.data,w,h,rgb.strides[0],QImage.Format_RGB888).copy()
+            self.preview.setPixmap(QPixmap.fromImage(image).scaled(285,170,Qt.KeepAspectRatio,Qt.SmoothTransformation))
 
     def on_fix(self,fix,frame,live):
         if fix.map_id is not None and ((fix.map_id,fix.generation)!=self.worker.context or fix.map_id!=self.project['map']):return
-        now=time.monotonic();self.frame=frame
-        rgb=frame[:,:,::-1].copy();h,w=rgb.shape[:2];image=QImage(rgb.data,w,h,rgb.strides[0],QImage.Format_RGB888).copy()
-        self.preview.setPixmap(QPixmap.fromImage(image).scaled(285,170,Qt.KeepAspectRatio,Qt.SmoothTransformation))
         if live and not self.worker.capture:return
+        now=time.monotonic()
+        if not live:self.failure_diagnostic=None
         if fix.valid and live and self.last_accepted and now-self.last_accepted_time<8:
             jump=distance([fix.x,fix.y],self.last_accepted)*(self.project['meters_per_pixel'] or 1)
             if jump>max(80,80*(now-self.last_accepted_time)):
@@ -870,14 +899,15 @@ class MainWindow(QMainWindow):
                 if self.jump_count<3:fix.valid=False;fix.reason='位置突变，正在重新确认'
             else:self.jump_count=0
         self.fix=fix;self.fix_live=live and fix.valid;self.fix_time=now
+        self.remember_frame(fix,frame,'live' if live else 'image')
         self.map.update_fix(fix)
         if fix.valid:
             self.fix_label.setText(('实时定位' if live else '图片检验')+f' · {fix.confidence:.0%}')
-            self.fix_detail.setText(f'位置 {fix.x:.1f}, {fix.y:.1f}  ·  匹配点 {fix.inliers}\n误差 {fix.error:.2f}px  ·  朝向 {fix.heading:.0f}°' if fix.heading is not None else f'位置 {fix.x:.1f}, {fix.y:.1f}  ·  匹配点 {fix.inliers}')
+            heading=f'{fix.heading:.0f}°' if fix.heading is not None else '未知'
+            self.fix_detail.setText(f'位置 {fix.x:.1f}, {fix.y:.1f}  ·  匹配点 {fix.inliers}\n误差 {fix.error:.2f}px  ·  朝向 {heading}')
             if live:self.last_accepted=[fix.x,fix.y];self.last_accepted_time=now
         else:
-            self.minimap_overlay.hide()
-            self.fix_label.setText('定位丢失 · 已暂停播报');self.fix_detail.setText(fix.reason);self.navigator.lost();self.tts.stop();self.set_hud({'state':'lost','text':'定位丢失'});return
+            self.invalidate_fix(fix.reason);return
         if self.pending_start and live:self.begin_navigation()
         if self.navigator.active and live:
             data=self.navigator.update([fix.x,fix.y],now)
@@ -923,8 +953,8 @@ class MainWindow(QMainWindow):
             self.minimap_overlay.hide()
         keep_on_top(self.hud)
         if self.minimap_overlay.isVisible():keep_on_top(self.minimap_overlay)
-        if self.navigator.active and time.monotonic()-self.fix_time>2.5:
-            self.fix_live=False;self.navigator.lost();self.tts.stop();self.set_hud({'state':'lost','text':'等待实时定位'})
+        if self.fix_live and time.monotonic()-self.fix_time>2.5:
+            self.invalidate_fix('超过 2.5 秒未收到有效实时位置，等待重新定位')
 
     def select_region(self):
         self.worker.capture=False;self.capture_button.setText('开启定位');self.stop_navigation(quiet=True)
@@ -967,16 +997,24 @@ class MainWindow(QMainWindow):
             self.overlay_status.setText('路径已显示；当前系统在定位时滤除路径区域，避免叠加线参与匹配。鼠标穿透，定位丢失时自动隐藏。')
 
     def save_capture_diagnostic(self):
-        if self.frame is None:self.notify('先开启定位，或用图片检验，再保存诊断');return
-        path,_=QFileDialog.getSaveFileName(self,'保存小地图与定位诊断','定位诊断.png','PNG (*.png)')
+        is_failure=self.failure_diagnostic is not None
+        snapshot=self.failure_diagnostic or self.frame_diagnostic
+        if snapshot is None:self.notify('先开启定位，或用图片检验，再保存诊断');return
+        frame,metadata=snapshot
+        has_frame=frame is not None
+        path,_=QFileDialog.getSaveFileName(self,'保存定位诊断',
+            '定位诊断.png' if has_frame else '定位诊断.json','PNG (*.png)' if has_frame else 'JSON (*.json)')
         if not path:return
         try:
             import cv2
-            from dataclasses import asdict
-            target=Path(path);cv2.imencode('.png',self.frame)[1].tofile(str(target))
-            atomic_json(target.with_suffix('.json'),{'fix':asdict(self.fix) if self.fix else None,'capture':self.settings['capture'],'anchor':self.settings['anchor'],'north_up':self.settings['north_up']})
-            self.notify('已保存小地图 PNG 与同名诊断 JSON')
-        except (OSError,ValueError) as error:self.notify(f'保存失败：{error}')
+            target=Path(path)
+            if has_frame:cv2.imencode('.png',frame)[1].tofile(str(target.with_suffix('.png')))
+            metadata=dict(metadata,selected='latest_failure' if is_failure else 'latest_frame',
+                          saved_at=time.time(),current_fix=asdict(self.fix) if self.fix else None)
+            atomic_json(target.with_suffix('.json'),metadata)
+            self.notify('已保存最近失败帧 PNG 与诊断 JSON' if has_frame and is_failure else
+                        '已保存小地图 PNG 与诊断 JSON' if has_frame else '未取得截图；已保存错误诊断 JSON')
+        except (OSError,ValueError,cv2.error) as error:self.notify(f'保存失败：{error}')
 
     def hud_setting(self,key,value):self.settings['hud'][key]=value;self.hud.apply_settings();self.save_settings()
 
@@ -1024,6 +1062,7 @@ class MainWindow(QMainWindow):
     def test_image(self):
         path,_=QFileDialog.getOpenFileName(self,'用小地图图片检验定位','','地图截图 (*.png *.jpg *.jpeg *.bmp)')
         if path:
+            self.failure_diagnostic=None
             self.worker.capture=False;self.capture_button.setText('开启定位');self.stop_navigation(quiet=True);self.worker.request_sample(path);self.notify('正在检验图片；实时导航需重新开启定位')
 
     def update_scale_label(self):
