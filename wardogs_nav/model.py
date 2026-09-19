@@ -143,6 +143,8 @@ def validate_project(data):
             raise ValueError('目的地名称无效')
     if data.get('destination') is not None:
         point(data['destination'])
+    if result.setdefault('start',None) is not None:
+        point(result['start'])
     library = result.setdefault('route_library', [])
     if not isinstance(library,list) or len(library)>1000:
         raise ValueError('路线收藏必须为列表且不超过 1000 条')

@@ -39,10 +39,13 @@ def feature_mask(image, minimap=True, path_mask=None):
     overlay = ((hsv[:, :, 1] > 80) | (hsv[:, :, 2] > 215)).astype(np.uint8)
     overlay = cv2.dilate(overlay, np.ones((7, 7), np.uint8))
     mask[overlay > 0] = 0
-    if path_mask and len(path_mask[0])>=2:
+    if path_mask:
         # Mask our last rendered screen-space route as well as its colour. This
         # remains reliable when users choose a nearly transparent path.
-        cv2.polylines(mask,[np.int32(path_mask[0])],False,0,max(3,round(path_mask[1])+10))
+        paths=path_mask['paths'] if isinstance(path_mask,dict) else [path_mask[0]]
+        width=path_mask['width'] if isinstance(path_mask,dict) else path_mask[1]
+        paths=[np.int32(points) for points in paths if len(points)>=2]
+        if paths:cv2.polylines(mask,paths,False,0,max(3,round(width)+10))
     return mask
 
 

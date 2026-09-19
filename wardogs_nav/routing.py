@@ -187,6 +187,16 @@ def point_at(points, lengths, s):
     return tuple(points[i][k]+f*(points[i+1][k]-points[i][k]) for k in (0,1))
 
 
+def remaining_points(route, progress):
+    """Clip at accepted navigation progress, including the current segment."""
+    if not route or len(route.points)<2:return []
+    lengths=cumulative(route.points)
+    if progress>=lengths[-1]:return []
+    progress=max(0.,progress)
+    return [point_at(route.points,lengths,progress),
+            *(p for p,s in zip(route.points,lengths) if s>progress)]
+
+
 def junctions_on_route(nodes, adjacency, route):
     """Physical branches, independent of road IDs, policy, or simple road bends."""
     lengths = cumulative(route.points)

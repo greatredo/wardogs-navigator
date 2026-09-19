@@ -74,6 +74,7 @@ def test_live_worker_recovers_after_frame_failure(window,app,monkeypatch,roundtr
     try:
         window.start_navigation()
         until(app,lambda:window.navigator.active and window.fix_live)
+        project['start']=[505,1245]
         fail_now.set()
         until(app,lambda:window.fix is not None and not window.fix.valid)
         assert window.worker.capture and window.worker.isRunning()
@@ -84,7 +85,7 @@ def test_live_worker_recovers_after_frame_failure(window,app,monkeypatch,roundtr
         recover_now.set()
         until(app,lambda:source.count>=3 and window.fix_live)
         assert window.navigator.active and window.navigator.roundtrip==roundtrip
-        assert window.project==project and window.home==[505,1245]
+        assert window.project==project and window.project['start']==[505,1245]
     finally:
         fail_now.set();recover_now.set();window.worker.shutdown()
 
@@ -198,7 +199,7 @@ def test_recovery_near_arrival_keeps_journey_and_return_leg(window,roundtrip):
     window.on_fix(good_fix(window.worker,160,100),frame,True)
     window.on_fix(Fix(reason='temporary obstruction',map_id='ozeti'),frame,True)
     for _ in range(2):window.on_fix(good_fix(window.worker,200,100),frame,True)
-    assert window.project['destination']==[200,100] and window.home==[100,100]
+    assert window.project['destination']==[200,100] and window.project['start']==[100,100]
     if roundtrip:
         assert window.navigator.active and window.navigator.lap==1 and window.navigator.leg=='返程'
         assert window.route.points[-1]==pytest.approx([100,100])

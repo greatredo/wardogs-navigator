@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
             self.project=upgraded
         self.history=[]
         self.route=None
+        self.full_route=None
         self.fix=None
         self.fix_live=False
         self.fix_time=0.
@@ -93,7 +94,6 @@ class MainWindow(QMainWindow):
         self.frame=None
         self.frame_diagnostic=None
         self.failure_diagnostic=None
-        self.home=None
         self.favorite_trip=None
         self.draft_kinds=[]
         self.navigator=Navigator()
@@ -169,7 +169,7 @@ class MainWindow(QMainWindow):
         toolbar_box=QWidget();toolbar_box.setStyleSheet('QPushButton { padding:7px 4px; }')
         toolbar_layout=QVBoxLayout(toolbar_box);toolbar_layout.setContentsMargins(0,0,0,0);toolbar_layout.setSpacing(6)
         toolbar=QHBoxLayout();toolbar_layout.addLayout(toolbar)
-        for label,tool in [('移动 / 选路','pan'),('目的地','destination'),('危险区','avoid'),('途经点','waypoint'),('绘制道路','road')]:toolbar.addWidget(self.button(label,lambda _,t=tool:self.set_tool(t)))
+        for label,tool in [('移动 / 选路','pan'),('起始点','start'),('目的地','destination'),('危险区','avoid'),('途经点','waypoint'),('绘制道路','road')]:toolbar.addWidget(self.button(label,lambda _,t=tool:self.set_tool(t)))
         toolbar.addStretch();toolbar.addWidget(self.button('适应地图',lambda:self.map.fit()));right_layout.addWidget(toolbar_box)
         cleanup=QHBoxLayout();toolbar_layout.addLayout(cleanup)
         cleanup.addWidget(self.clear_route_button('toolbar'))
@@ -212,9 +212,14 @@ class MainWindow(QMainWindow):
         status.addWidget(self.row(self.button('框选小地图',self.select_region),self.capture_button))
         self.start_button=self.button('开始导航',self.start_navigation,True);status.addWidget(self.start_button)
         status.addWidget(self.row(self.button('停止',self.stop_navigation),self.button('显示图标',self.show_hud),self.button('隐藏图标',self.hud.hide)))
-        target=self.group('目的地与途经点',layout)
+        target=self.group('起始点、目的地与途经点',layout)
         target.addWidget(self.clear_route_button('navigation'))
         target.addWidget(self.row(self.clear_button('waypoints','navigation'),self.clear_button('avoid','navigation')))
+        self.start_label=self.text('');target.addWidget(self.start_label)
+        self.set_start_button=self.button('地图设置起点',lambda:self.set_tool('start'))
+        self.current_start_button=self.button('使用当前位置',self.use_current_start)
+        target.addWidget(self.row(self.set_start_button,self.current_start_button))
+        target.addWidget(self.text('起始点也是返程终点，途中可修改；未设置时，开始导航会自动放在当前位置。',True))
         self.destination_label=self.text('在地图点选目的地');target.addWidget(self.destination_label)
         self.saved_dest=QComboBox();self.saved_dest.currentIndexChanged.connect(self.choose_destination);target.addWidget(self.saved_dest)
         target.addWidget(self.row(self.button('地图选点',lambda:self.set_tool('destination')),self.button('收藏目的地',self.save_destination)))
@@ -229,7 +234,7 @@ class MainWindow(QMainWindow):
         controls=self.group('导航与播报',layout)
         self.mode=QComboBox();self.mode.addItem('常规导航','normal');self.mode.addItem('WRC 路书','wrc');self.mode.setCurrentIndex(self.mode.findData(self.settings['mode']));self.mode.currentIndexChanged.connect(self.change_mode);controls.addWidget(self.mode)
         self.route_label=self.text('路线尚未规划',True);controls.addWidget(self.route_label)
-        controls.addWidget(self.button('预览路线',self.plan_route))
+        controls.addWidget(self.button('预览路线',self.preview_route))
         controls.addWidget(self.row(self.button('收藏当前路线',self.save_current_route),self.button('查看播报',self.preview_cues)))
         layout.addStretch()
 
@@ -340,7 +345,7 @@ class MainWindow(QMainWindow):
         self.stop_navigation(quiet=True);self.worker.capture=False;self.capture_button.setText('开启定位')
         self.worker.request_map(map_id)
         self.settings['map_id']=map_id;self.project=target;self.history=[]
-        self.route=None;self.favorite_trip=None;self.home=None;self.frame=None
+        self.route=None;self.full_route=None;self.favorite_trip=None;self.frame=None
         self.frame_diagnostic=None;self.failure_diagnostic=None
         self.fix=None;self.fix_live=False;self.fix_time=0.;self.pending_start=False
         self.last_accepted=None;self.last_accepted_time=0.;self.jump_candidate=None;self.jump_count=0
@@ -380,17 +385,18 @@ class MainWindow(QMainWindow):
             for p in waypoints:
                 q=nearest_on_route(p,self.navigator.route.points)
                 if q is None or q[0]>25 or q[1]>self.navigator.progress+3:remaining.append(p)
-            goal=self.home if lap%2 else self.project['destination']
+            goal=self.project['start'] if lap%2 else self.project['destination']
             if goal:anchors=[[self.fix.x,self.fix.y],*remaining,goal]
         self.stop_navigation(quiet=True)
         self.pending_start=False
-        self.route=None;self.map.route=None
+        self.route=None;self.full_route=None;self.map.route=None
         self.refresh_lists();self.refresh_map();self.autosave.start()
-        if replan and self.project['destination'] and ((self.fix and self.fix.valid) or self.active_favorite()):
+        if replan and self.project['destination'] and (self.project['start'] or (self.fix and self.fix.valid) or self.active_favorite()):
             success=self.plan_route(quiet=True,anchors=anchors)
             if resume and success:
                 self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip'])
                 self.navigator.leg,self.navigator.lap=leg,lap
+                self.update_minimap_overlay()
                 self.speak('路线已更新')
 
     def save_project(self):
@@ -420,7 +426,10 @@ class MainWindow(QMainWindow):
         self.saved_dest.blockSignals(True);self.saved_dest.clear();self.saved_dest.addItem('选择收藏的目的地')
         for d in self.project['destinations']:self.saved_dest.addItem(d['name'])
         self.saved_dest.blockSignals(False)
-        d=self.project['destination'];self.destination_label.setText(f'终点  {d[0]:.0f}, {d[1]:.0f}' if d else '在地图点选目的地')
+        start=self.project['start']
+        self.start_label.setText(f'起始点 / 返程终点  {start[0]:.0f}, {start[1]:.0f}' if start else '起始点未设置 · 开始导航时使用当前位置')
+        d=self.project['destination'];label='去程终点' if self.project['roundtrip'] else '终点'
+        self.destination_label.setText(f'{label}  {d[0]:.0f}, {d[1]:.0f}' if d else '在地图点选目的地')
         selected=self.favorite_list.currentRow();self.favorite_list.clear()
         for saved in self.project['route_library']:
             active='▶ ' if saved['id']==self.project.get('active_route_id') else ''
@@ -431,7 +440,7 @@ class MainWindow(QMainWindow):
 
     def refresh_map(self):
         self.update_favorite_preview()
-        self.map.project=self.project;self.map.route=self.route;self.map.fix=self.fix;self.map.redraw()
+        self.map.project=self.project;self.map.route=self.route;self.map.full_route=self.full_route;self.map.fix=self.fix;self.map.redraw()
 
     def favorite_drawing_option(self,*_):
         self.update_drawing_controls()
@@ -469,6 +478,7 @@ class MainWindow(QMainWindow):
         self.favorite_options.setVisible(tool=='favorite');self.favorite_preview_label.setVisible(tool=='favorite')
         self.update_drawing_controls()
         tips={'pan':'拖动平移，滚轮缩放；单击选路并拖点，双击改属性，右键可删除','destination':'在地图单击设置目的地（退出收藏路线）','waypoint':'单击增加途经点；顺序为路线必经顺序（退出收藏路线）','avoid':'按住鼠标拖出矩形危险区，松开后自动绕行','road':'选择类型，沿道路或野地逐点绘制；Enter / 双击完成，Backspace 退一点','favorite':'逐点绘制完整路径；可勾选贴合道路，或选择是否建立缺失道路；Enter 保存','note':'在路线旁单击添加 WRC 路书','calibrate':'依次点选两个已知距离的地标'}
+        tips['start']='在地图单击设置起始点；往返时此点为返程终点，可随时拖动修改'
         self.notify(tips[tool])
         if tool=='calibrate':self.calibration_points=[]
         self.refresh_map()
@@ -493,7 +503,8 @@ class MainWindow(QMainWindow):
 
     def map_click(self,x,y):
         p=[x,y];tool=self.map.tool
-        if tool=='destination':self.snapshot();self.detach_favorite();self.project['destination']=p;self.changed();self.set_tool('pan')
+        if tool=='start':self.set_start(p);self.set_tool('pan')
+        elif tool=='destination':self.snapshot();self.detach_favorite();self.project['destination']=p;self.changed();self.set_tool('pan')
         elif tool=='waypoint':self.snapshot();self.detach_favorite();self.project['waypoints'].append(p);self.changed()
         elif tool=='avoid':
             radius,ok=QInputDialog.getInt(self,'避让区域','半径（米）',150,10,3000,10)
@@ -573,11 +584,12 @@ class MainWindow(QMainWindow):
         self.snapshot();count=supplement_roads(self.project['roads'],saved) if saved.get('build_roads',True) else 0
         self.favorite_trip=None
         self.project['active_route_id']=saved['id'];self.project['active_route_reverse']=bool(reverse)
+        self.project['start']=list(saved['points'][-1 if reverse else 0])
         self.project['destination']=list(saved['points'][0 if reverse else -1]);self.project['waypoints']=[]
         self.changed(replan=False)
         if self.plan_route(preview_full=True,quiet=True):
             detail=f'补入 {count} 条道路。' if saved.get('build_roads',True) else '仅用于本收藏，未建立公共道路。'
-            self.notify(f"已载入 {saved['name']} 的完整路径；{detail}开始导航时接入当前位置。")
+            self.notify(f"已载入 {saved['name']} 的完整路径与起终点；{detail}开始导航时接入当前位置，可另行修改起始点。")
         else:self.notify(self.route_label.text())
 
     def rename_favorite(self):
@@ -698,17 +710,26 @@ class MainWindow(QMainWindow):
     def clear_route_button(self,location):
         button=self.button('清除当前路线',self.clear_current_route)
         button.setObjectName('clear_current_route_'+location)
-        button.setToolTip('停止导航并清除当前目的地、途经点和路线显示；退出当前收藏，保留已保存的道路、收藏、危险区与路线规则')
+        button.setToolTip('停止导航并清除起始点、目的地、途经点和路线；保留图标显隐状态、已保存的道路、收藏、危险区与路线规则')
         return button
 
     def clear_current_route(self):
-        if self.project['destination'] is not None or self.project['waypoints'] or self.active_favorite():self.snapshot()
-        self.project['destination']=None;self.project['waypoints']=[];self.detach_favorite();self.home=None
+        if self.project['start'] is not None or self.project['destination'] is not None or self.project['waypoints'] or self.active_favorite():self.snapshot()
+        self.project['start']=None;self.project['destination']=None;self.project['waypoints']=[];self.detach_favorite()
         self.changed(replan=False)
-        self.navigator=Navigator();self.minimap_overlay.points=[];self.worker.path_mask=None
+        self.navigator=Navigator();self.minimap_overlay.points=[];self.minimap_overlay.full_points=[];self.worker.path_mask=None
         self.route_label.setText('路线已清除；请选择新的目的地')
-        self.set_hud({'state':'idle','text':'路线已清除'});self.hud.hide()
-        self.notify('当前路线、目的地和途经点已清除，导航已停止；可撤销恢复行程设置')
+        self.set_hud({'state':'idle','text':'路线已清除'})
+        self.notify('路线、起始点、目的地和途经点已清除，导航已停止；可撤销恢复行程设置')
+
+    def set_start(self,point):
+        self.snapshot();self.project['start']=list(point);self.favorite_trip=None;self.changed()
+        self.notify('起始点已更新；往返时返回此点，修改目的地不会覆盖起始点')
+
+    def use_current_start(self):
+        if not (self.fix_live and self.fix and self.fix.valid and time.monotonic()-self.fix_time<2.5):
+            self.notify('请先开启定位并取得当前有效位置，再设置起始点');return
+        self.set_start([self.fix.x,self.fix.y])
 
     def move_item(self,key,p):
         # The scene item emits on mouse release; defer rebuilding its scene until
@@ -719,6 +740,7 @@ class MainWindow(QMainWindow):
                 road=next(r for r in self.project['roads'] if r['id']==key[1]);old=road['points'][key[2]]
                 for r in self.project['roads']:
                     r['points']=[list(p) if distance(old,q)<1.5 else q for q in r['points']]
+            elif kind=='start':self.project['start']=p;self.favorite_trip=None
             elif kind=='destination':self.detach_favorite();self.project['destination']=p
             elif kind=='waypoint':self.detach_favorite();self.project['waypoints'][key[1]]=p
             elif kind=='note':self.project['notes'][key[1]]['point']=p
@@ -735,6 +757,8 @@ class MainWindow(QMainWindow):
                 road=next(r for r in self.project['roads'] if r['id']==key[1])
                 if len(road['points'])<=2:self.notify('道路至少需要两个点；可在列表删除整条道路');return
                 road['points'].pop(key[2])
+            elif kind=='start':
+                self.project['start']=None;self.favorite_trip=None;self.stop_navigation(quiet=True)
             elif kind=='destination':self.detach_favorite();self.project['destination']=None
             elif kind=='waypoint':self.detach_favorite();self.project['waypoints'].pop(key[1])
             elif kind=='note':self.project['notes'].pop(key[1])
@@ -778,31 +802,59 @@ class MainWindow(QMainWindow):
         try:atomic_json(path,validate_project(self.project));self.notify('配置已导出：'+path)
         except (OSError,ValueError,TypeError) as error:self.notify(f'导出失败：{error}')
 
+    def preview_route(self):
+        if self.navigator.active:
+            if self.fix_live and self.fix and self.fix.valid:self.replan_navigation()
+            else:self.notify('等待有效实时定位后再重算当前路线')
+        else:self.plan_route(preview_full=True)
+
     def plan_route(self,*_,quiet=False,anchors=None,preview_full=False):
         saved=self.active_favorite()
+        returning=bool(anchors is not None and self.navigator.lap%2)
+        current=anchors[0] if anchors else None
         if anchors is None and not saved:
-            if not self.fix or not self.fix.valid:
-                if not quiet:self.notify('请先开启定位；也可以在设置中用小地图图片检验匹配')
+            origin=self.project['start'] or ([self.fix.x,self.fix.y] if self.fix and self.fix.valid else None)
+            if origin is None:
+                if not quiet:self.notify('请先设置起始点或开启定位')
                 return False
             if not self.project['destination']:
                 if not quiet:self.notify('请先在地图选择目的地')
                 return False
-            anchors=[[self.fix.x,self.fix.y],*self.project['waypoints'],self.project['destination']]
+            anchors=[origin,*self.project['waypoints'],self.project['destination']]
+        complete=True
         try:
             p=self.project['policy']
             if saved:
-                current=None if preview_full else anchors[0] if anchors else [self.fix.x,self.fix.y] if self.fix and self.fix.valid else None
                 journey=self.favorite_trip if self.favorite_trip and not preview_full else saved
-                reverse=bool(self.navigator.lap%2) if journey is self.favorite_trip else self.project.get('active_route_reverse',False)
-                self.route=follow_saved(self.project['roads'],journey,p,self.project['avoid'],current,reverse)
-            else:self.route=plan(self.project['roads'],anchors,p['allowed'],p['confirmed_only'],self.project['avoid'])
+                if journey is self.favorite_trip:
+                    self.route=follow_saved(self.project['roads'],journey,p,self.project['avoid'],current,returning)
+                    self.full_route=self.route
+                    if current is not None:
+                        try:self.full_route=follow_saved(self.project['roads'],journey,p,self.project['avoid'],reverse=returning)
+                        except RouteError:complete=False
+                else:
+                    full=follow_saved(self.project['roads'],journey,p,self.project['avoid'],self.project['start'],self.project.get('active_route_reverse',False))
+                    trip=saved_route('本次完整往返',full,snap_to_roads=saved.get('snap_to_roads',False),build_roads=saved.get('build_roads',True))
+                    self.full_route=full.reversed() if returning else full
+                    self.route=follow_saved(self.project['roads'],trip,p,self.project['avoid'],current,returning) if current is not None else self.full_route
+                    if self.project['start'] is not None and not preview_full:self.favorite_trip=trip
+            else:
+                self.route=plan(self.project['roads'],anchors,p['allowed'],p['confirmed_only'],self.project['avoid'])
+                self.full_route=self.route
+                if self.project['start'] is not None:
+                    full_anchors=[self.project['start'],*self.project['waypoints'],self.project['destination']]
+                    if returning:full_anchors.reverse()
+                    if full_anchors!=anchors:
+                        try:self.full_route=plan(self.project['roads'],full_anchors,p['allowed'],p['confirmed_only'],self.project['avoid'])
+                        except RouteError:complete=False
         except RouteError as error:
-            self.route=None;self.route_label.setText(str(error));self.refresh_map()
+            self.route=None;self.full_route=None;self.route_label.setText(str(error));self.refresh_map()
             if not quiet:self.notify(str(error))
             return False
         scale=self.project['meters_per_pixel'];length=self.route.length*(scale or 1)
         total=f'{length/1000:.2f} km' if scale else f'{length:.0f} 地图单位'
         self.route_label.setText(f"{total} · {len(self.project['waypoints'])} 个途经点\n端点吸附偏移 {max(self.route.snap_distances)*(scale or 1):.0f} {'m' if scale else '单位'}")
+        if not complete:self.route_label.setText(self.route_label.text()+'\n完整路线暂不可达，显示当前可行路段；起始点保持不变')
         self.refresh_map()
         if not quiet:self.notify('已沿完整收藏规划，危险区局部绕行' if saved else '路线已规划；拖动绿点可调整必经位置')
         return True
@@ -844,13 +896,14 @@ class MainWindow(QMainWindow):
 
     def begin_navigation(self):
         self.pending_start=False
+        if not (self.fix and self.fix.valid):return
         self.favorite_trip=None;self.navigator.lap=0
-        if not self.plan_route(quiet=True):return
-        self.home=[self.fix.x,self.fix.y]
-        if self.active_favorite():
-            saved=self.active_favorite()
-            self.favorite_trip=saved_route('本次完整往返',self.route,snap_to_roads=saved.get('snap_to_roads',False),build_roads=saved.get('build_roads',True))
+        if self.project['start'] is None:
+            self.snapshot();self.project['start']=[self.fix.x,self.fix.y];self.autosave.start();self.refresh_lists();self.refresh_map()
+        anchors=[[self.fix.x,self.fix.y],*self.project['waypoints'],self.project['destination']]
+        if not self.plan_route(quiet=True,anchors=anchors):return
         self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip'])
+        self.update_minimap_overlay()
         self.hud.show();self.notify('导航已开始 · 定位失效时暂停播报')
 
     def stop_navigation(self,*_,quiet=False):
@@ -927,7 +980,7 @@ class MainWindow(QMainWindow):
         for p in waypoints:
             projection=nearest_on_route(p,old.route.points)
             if projection and projection[1]>old.progress+3:remaining.append(p)
-        goal=self.home if old.lap%2 else self.project['destination']
+        goal=self.project['start'] if old.lap%2 else self.project['destination']
         lap,leg=old.lap,old.leg
         if self.plan_route(quiet=True,anchors=[[self.fix.x,self.fix.y],*remaining,goal]):
             self.tts.stop()
@@ -942,7 +995,7 @@ class MainWindow(QMainWindow):
         lap,leg=self.navigator.lap,self.navigator.leg
         waypoints=list(self.project['waypoints'])
         if lap%2:waypoints.reverse()
-        goal=self.home if lap%2 else self.project['destination']
+        goal=self.project['start'] if lap%2 else self.project['destination']
         if self.plan_route(quiet=True,anchors=[[self.fix.x,self.fix.y],*waypoints,goal]):
             self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip']);self.navigator.lap=lap;self.navigator.leg=leg
         else:
@@ -992,7 +1045,7 @@ class MainWindow(QMainWindow):
     def update_minimap_overlay(self):
         if not (self.navigator.active and self.fix_live and self.fix and self.fix.valid and self.frame is not None):
             self.minimap_overlay.hide();return
-        self.minimap_overlay.update_route(self.route,self.fix,(self.frame.shape[1],self.frame.shape[0]),self.settings['anchor'],self.settings['capture'])
+        self.minimap_overlay.update_route(self.route,self.fix,(self.frame.shape[1],self.frame.shape[0]),self.settings['anchor'],self.settings['capture'],full_route=self.full_route,progress=self.navigator.progress)
         if self.minimap_overlay.capture_excluded is False:
             self.overlay_status.setText('路径已显示；当前系统在定位时滤除路径区域，避免叠加线参与匹配。鼠标穿透，定位丢失时自动隐藏。')
 
@@ -1078,13 +1131,13 @@ class MainWindow(QMainWindow):
             '1. 保留游戏全屏模式，小地图固定北朝上。叠加显示依赖 Windows 全屏优化；若被遮挡再尝试无边框全屏。\n'
             '2. 在顶部选择当前游戏地图，再框选小地图，调整玩家锚点（默认区域中心），开启定位。\n'
             '3. 地图点选终点；拖框标记危险区，路线自动绕开。也可拖动途经点指定必经位置。\n'
-            '4. 点击开始导航，在设置中调节图标位置尺寸及语音提前量。锁定图标后鼠标穿透。\n'
+            '4. 起始点可地图设置、拖动或使用当前位置；也是往返的返程终点。未设置时，开始导航会用当前有效位置放置，途中改目的地不会覆盖。小地图淡线为完整路线，亮线为随前进缩短的剩余路程。\n'
             '5. “移动 / 选路”下单击道路选中并拖点；双击编辑属性，右键编辑或删除。绘路时 Enter 完成、Esc 取消，Ctrl+Z 撤销。WRC 1 为慢弯、6 为快弯，手动路书优先。\n\n'
             '6. 绘路可选大路、小路或野地；Backspace 退一点。路网可单独导入导出。\n'
             '7. 收藏可勾选“贴合现有道路”，粗略放点后预览沿路路径。关闭时保留完整走法并选择是否建立道路。导入同样确认选项；不建路也可导航，仅该收藏使用。导出保留完整路径、类型、粗绘点、选项与路书，可反向载入。收藏仍遵守危险区与道路规则。\n'
             '8. 常规提示路口动作和沿路距离；WRC 提示弯级、直角和手动急刹车等，显示后续三条路书。两种模式提前量独立调整，可在导航页查看播报列表。\n\n'
             '9. OZETI、BAKURANI、ZESTAFONA 分别保存道路、收藏、危险区、路书和比例尺。切图会保存当前配置并停止导航；重新开启定位后继续。完整配置导入会切至对应地图，路网和收藏资料库需先切到同一地图再合并。\n\n'
-            '道路按分类直接参与规划，无需设置确认状态；地图道路统一用虚线，导航路线保持实线。“清除当前路线”会停止导航，清掉本次目的地、途经点和路线显示，并退出当前收藏；已保存的道路、收藏和危险区保留。可撤销恢复行程设置，重新开始导航需手动点击。途经点和危险区也可分别清空。路线端点吸附到道路，不包含未知地形的末段引导。图片无法识别地雷、实时路障或证明越野可通行。\n'
+            '道路按分类直接参与规划，无需设置确认状态；地图道路统一用虚线，导航路线保持实线。“清除当前路线”会停止导航，清掉本次起始点、目的地、途经点和路线显示，并退出当前收藏；图标保持原来的显隐状态，已保存的道路、收藏和危险区保留。可撤销恢复行程设置，重新开始导航需手动点击。途经点和危险区也可分别清空。路线端点吸附到道路，不包含未知地形的末段引导。图片无法识别地雷、实时路障或证明越野可通行。\n'
             '仅获取指定屏幕区域，不读取游戏内存或自动控制载具。第三方工具许可仍以游戏方规定为准。\n\n'
             f'配置自动保存在：{user_dir()}\n导出 JSON 可备份或共享完整地图配置。')
 

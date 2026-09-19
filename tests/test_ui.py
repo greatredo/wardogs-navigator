@@ -50,22 +50,22 @@ def test_drag_destination_changes_config_and_route(window,app):
 
 def test_editing_danger_while_navigating_resumes(window,app):
     assert window.plan_route()
-    window.fix_live=True;window.home=[505,1245]
+    window.fix_live=True;window.project['start']=[505,1245]
     window.navigator.start(window.route,[],window.settings,window.project['meters_per_pixel'],True)
     window.project['roundtrip']=True
     window.add_danger_region({'shape':'rect','point':[1152,789],'width':14,'height':14});app.processEvents()
     assert window.navigator.active and window.navigator.roundtrip
-    assert window.home==[505,1245]
+    assert window.project['start']==[505,1245]
 
 
 def test_return_leg_targets_original_home_after_replan(window,app):
     assert window.plan_route()
-    window.home=[505,1245];window.project['roundtrip']=True
+    window.project['start']=[505,1245];window.project['roundtrip']=True
     window.navigator.start(window.route,[],window.settings,window.project['meters_per_pixel'],True)
     window.navigator.lap=1;window.navigator.leg='返程'
     window.fix=Fix(x=1300,y=796,valid=True)
     window.next_leg()
-    assert window.navigator.active and distance(window.route.points[-1],window.home)<1
+    assert window.navigator.active and distance(window.route.points[-1],window.project['start'])<1
     assert window.navigator.lap==1
 
 

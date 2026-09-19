@@ -124,6 +124,7 @@ def test_private_route_stays_private_through_replan_return_restart_and_export(wi
     saved=dict(id='private',name='仅收藏',points=[[100,100],[100,300],[300,300]],kinds=['minor','offroad'],snap_to_roads=False,build_roads=False)
     window.store_favorite(saved);window.favorite_list.setCurrentRow(0);window.load_favorite()
     assert window.route.length==pytest.approx(400) and window.project['roads']==[]
+    assert window.project['start']==[100,100] and window.project['destination']==[300,300]
     window.fix=Fix(x=100,y=100,valid=True);window.fix_live=True;window.project['roundtrip']=True;window.begin_navigation()
     assert window.favorite_trip['build_roads'] is False
     window.fix=Fix(x=100,y=200,valid=True);window.replan_navigation()
@@ -138,4 +139,5 @@ def test_private_route_stays_private_through_replan_return_restart_and_export(wi
         assert restored.project['route_library']==[saved] and restored.project['roads']==[]
         restored.favorite_list.setCurrentRow(0);restored.load_favorite(reverse=True)
         assert restored.route.length==pytest.approx(400) and restored.project['roads']==[]
+        assert restored.project['start']==[300,300] and restored.project['destination']==[100,100]
     finally:restored.close();app.processEvents()
