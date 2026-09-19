@@ -19,7 +19,7 @@ def run_selftest(output):
     output=Path(output);output.parent.mkdir(parents=True,exist_ok=True)
     os.environ.setdefault('WARDOGS_NAV_DATA',str(output.parent/(output.stem+'-data')))
     app=QApplication.instance() or QApplication([]);app.setStyle('Fusion');app.setStyleSheet(STYLE)
-    report={'version':'0.5.2','game_test':False,'checks':{},'errors':[]}
+    report={'version':'0.5.3','game_test':False,'checks':{},'errors':[]}
     window=None
     try:
         p=read_project(asset_path('default_project.json'))
@@ -80,7 +80,8 @@ def run_selftest(output):
         window.hud.grab().save(str(output.with_name(output.stem+'-wrc.png')))
         report['maps']={}
         saved_project=validate_project(window.project)
-        for mid,destination in [('bakurani',[1190,1803]),('zestafona',[1269,822])]:
+        # BAKURANI uses the maintained southern road endpoint, not the removed camp connector.
+        for mid,destination in [('bakurani',[1206.5,1741.5]),('zestafona',[1269,822])]:
             assert window.switch_map(mid)
             metadata=json.loads(map_asset(mid,'source').read_text(encoding='utf-8'))
             image=read_image(map_asset(mid,'source').parent/'reference-crop.png')

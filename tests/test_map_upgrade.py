@@ -9,7 +9,7 @@ def test_map_upgrade_preserves_user_destinations_zones_and_roads():
     road=dict(deepcopy(old['roads'][0]),id='user-road',name='用户自定义道路')
     old['roads'].append(road)
     updated,changed=upgrade_road_data(old)
-    assert changed and updated['road_data_revision']==2
+    assert changed and updated['road_data_revision']==read_project(asset_path('default_project.json'))['road_data_revision']
     assert updated['avoid']==old['avoid'] and updated['destination']==old['destination']
     assert road in updated['roads'] and old['roads'][0] not in updated['roads']
     assert len(old['roads'])==34
