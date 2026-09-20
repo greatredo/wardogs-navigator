@@ -8,6 +8,7 @@ import sys
 import uuid
 
 KINDS = {'major': '大路', 'minor': '小路', 'offroad': '野地 / 越野'}
+ROAD_PREFERENCES = {'prefer': '优先', 'normal': '正常', 'avoid': '尽量避开'}
 NOTE_TYPES = {'left': '左弯', 'right': '右弯', 'straight': '直行',
               'square_left': '左直角', 'square_right': '右直角',
               'hairpin_left': '左发卡', 'hairpin_right': '右发卡',
@@ -46,6 +47,7 @@ def default_settings():
             'anchor': [.5, .5], 'north_up': True, 'interval_ms': 700,
             'mode': 'normal', 'voice': True, 'voice_name': '', 'voice_rate': 0.,
             'lead_m': 100., 'lead_s': 4., 'arrival_m': 25., 'offroute_m': 80.,
+            'normal_chain_count': 2, 'normal_bends': True, 'wrong_way_alert': True,
             'road_tolerance_m': 30.,
             'wrc_lead_m': 150., 'wrc_lead_s': 5., 'wrc_chain_m': 60.,
             'main_topmost': False,
@@ -182,6 +184,14 @@ def validate_project(data):
     if not isinstance(policy,dict):raise ValueError('路线规则必须是对象')
     if not isinstance(policy.get('allowed'), list) or any(x not in KINDS for x in policy['allowed']):
         raise ValueError('路线规则无效')
+    preferences=policy.get('preferences')
+    if preferences is None:
+        # Old unchecked types become a soft avoidance, so short connectors work.
+        preferences={k:'normal' if k in policy['allowed'] else 'avoid' for k in KINDS}
+    if not isinstance(preferences,dict) or set(preferences)!=set(KINDS) or any(not isinstance(v,str) or v not in ROAD_PREFERENCES for v in preferences.values()):
+        raise ValueError('道路偏好无效')
+    policy['preferences']=preferences
+    policy['allowed']=list(KINDS)
     # Keep schema-1 compatibility fields, but road availability no longer has
     # a confirmation workflow. This does not assert real-world verification.
     for road in result['roads']:road['confirmed']=True

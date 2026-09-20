@@ -14,6 +14,7 @@ class Cue:
     lead_m: float = 0
     inferred: bool = False
     modifiers: list = field(default_factory=list)
+    end_at: float | None = None
 
 
 def geometric_cues(route, scale):
@@ -60,12 +61,13 @@ def geometric_cues(route, scale):
         grade=6 if radius>=250 else 5 if radius>=130 else 4 if radius>=70 else 3 if radius>=40 else 2 if radius>=20 else 1
         at=max(0.,g[0][0]-step/2)
         at=nearest_on_route(point_at(points,lengths,at),route.points)[1]
+        end_at=nearest_on_route(point_at(points,lengths,g[-1][0]+step/2),route.points)[1]
         cues.append(Cue(f'curve-{i}',at,kind,grade,inferred=True,
-                        modifiers=['long'] if span>130 else []))
+                        modifiers=['long'] if span>130 else [],end_at=end_at))
     return cues
 
 
-def cues_for(route, notes, mode, scale=1.):
+def cues_for(route, notes, mode, scale=1., settings=None):
     points = route.points
     lengths = cumulative(points)
     cues = []
@@ -75,6 +77,13 @@ def cues_for(route, notes, mode, scale=1.):
             direction='right' if delta>0 else 'left'
             kind='straight' if magnitude<22 else 'keep_'+direction if magnitude<40 else direction if magnitude<150 else 'uturn'
             cues.append(Cue(f'junction-{i}',junction['at'],kind))
+        if (settings or {}).get('normal_bends',True):
+            for curve in geometric_cues(route,scale or 1.):
+                # A bend at a junction is already described by its turn cue.
+                if curve.grade>5 or any(curve.at-15/scale<=j['at']<=(curve.end_at or curve.at)+15/scale for j in route.junctions):
+                    continue
+                curve.kind='bend_right' if 'right' in curve.kind else 'bend_left'
+                cues.append(curve)
     if mode == 'wrc':
         cues = geometric_cues(route, scale or 1.)
         for note in notes:
@@ -115,6 +124,7 @@ def cue_text(cue, mode, spoken=False):
         else:text='路口左转' if cue.kind == 'left' else '路口右转'
     else:
         text={'straight':'路口直行' if mode=='normal' else '直线',
+              'bend_left':'道路向左弯曲，请减速','bend_right':'道路向右弯曲，请减速',
               'keep_left':'路口向左前方','keep_right':'路口向右前方','uturn':'掉头'}.get(cue.kind,NOTE_TYPES.get(cue.kind,'继续前进'))
     if mode=='wrc' and cue.modifiers:text+='，'+'，'.join(MODIFIERS[m] for m in cue.modifiers)
     return text
@@ -143,6 +153,7 @@ class Navigator:
         self.arrival_lock = None
         self.waiting_for_road = False
         self.replan_retry = None
+        self.reset_direction()
 
     def start(self, route, notes, settings, scale, roundtrip=False, goal=None, return_goal=None):
         self.route = route
@@ -159,7 +170,7 @@ class Navigator:
         self.last_point = None
         self.speed = 0.
         self.spoken.clear()
-        self.cues = cues_for(route, notes, settings['mode'], self.scale)
+        self.cues = cues_for(route, notes, settings['mode'], self.scale, settings)
         self.lap = 0
         self.leg = '去程'
         self.offroute_count = 0
@@ -167,6 +178,7 @@ class Navigator:
         self.arrival_lock = None
         self.waiting_for_road = False
         self.replan_retry = None
+        self.reset_direction()
 
     def stop(self):
         self.active = False
@@ -177,6 +189,44 @@ class Navigator:
         self.last_time = None
         self.last_point = None
         self.speed = 0.
+        self.reset_direction()
+
+    def reset_direction(self):
+        self.direction_anchor=None
+        self.reverse_since=None
+        self.reverse_distance=0.
+        self.forward_distance=0.
+        self.wrong_way=False
+
+    def check_direction(self,point,now,s,gap):
+        """Confirm sustained backwards travel, not a stationary heading or jitter."""
+        if not self.settings.get('wrong_way_alert',True) or gap*self.scale>min(self.settings['offroute_m'],self.settings.get('road_tolerance_m',30)):
+            self.reset_direction();return False
+        anchor=self.direction_anchor
+        if anchor is None:
+            self.direction_anchor=(list(point),now,s);return False
+        old,t,old_s=anchor;dt=now-t;travel=distance(old,point)*self.scale
+        if dt<=0 or dt>3 or travel/dt>=85:
+            self.direction_anchor=(list(point),now,s)
+            self.reverse_since=None;self.reverse_distance=0.;self.forward_distance=0.
+            return False
+        if travel<6:return False
+        self.direction_anchor=(list(point),now,s)
+        middle=max(0,(old_s+s)/2);lengths=cumulative(self.route.points)
+        tangent=bearing(point_at(self.route.points,lengths,middle-5/self.scale),point_at(self.route.points,lengths,middle+5/self.scale))
+        angle=abs(angle_delta(tangent,bearing(old,point)))
+        delta=(s-old_s)*self.scale
+        if delta<-3 and angle>120:
+            if self.reverse_since is None:self.reverse_since=t
+            self.reverse_distance+=-delta;self.forward_distance=0.
+            if self.reverse_distance>=20 and now-self.reverse_since>=2 and not self.wrong_way:
+                self.wrong_way=True;return True
+        elif delta>3 and angle<60:
+            self.reverse_since=None;self.reverse_distance=0.;self.forward_distance+=delta
+            if self.forward_distance>=12:self.wrong_way=False
+        else:
+            self.reverse_since=None;self.reverse_distance=0.;self.forward_distance=0.
+        return False
 
     def defer_replan(self,point,now):
         self.waiting_for_road=True
@@ -207,7 +257,7 @@ class Navigator:
                 self.goal,self.return_goal=self.return_goal,self.goal
                 self.route=self.route.reversed()
                 self.lap+=1;self.leg='返程' if self.lap%2 else '去程'
-                self.cues=cues_for(self.route,self.notes,self.settings['mode'],self.scale)
+                self.cues=cues_for(self.route,self.notes,self.settings['mode'],self.scale,self.settings)
                 self.progress=0.;self.spoken.clear();self.lost()
                 return {'state':'turnaround','text':f'已到达，开始{self.leg}','speech':f'已到达，请安全掉头，开始{self.leg}','remaining':self.route.length*self.scale}
             self.active=False
@@ -225,6 +275,31 @@ class Navigator:
         # Constrain progress around the last segment to avoid jumping to a later
         # leg at a crossing or an out-and-back overlap.
         upper = math.inf if old_time is None else self.progress + max(45/self.scale, (self.speed*(dt or 1)+60)/self.scale)
+        # Look a little behind the accepted progress to identify reverse travel
+        # before it is mistaken for leaving the route. The usual progress window
+        # is retained until that direction has been confirmed.
+        backwards=max(120/self.scale,distance(point,old_point)+30/self.scale if old_point is not None else 0)
+        direction_projection=nearest_on_route(point,self.route.points,max(0,self.progress-backwards),upper)
+        if direction_projection and direction_projection[1]<1e-6:
+            # Starting a trip while facing away from it puts the vehicle behind
+            # the first route point. Extend only its first tangent for direction
+            # evidence; this does not create a drivable road or negative progress.
+            a,b=self.route.points[:2];length=distance(a,b)
+            ux,uy=(b[0]-a[0])/length,(b[1]-a[1])/length
+            extension=(point[0]-a[0])*ux+(point[1]-a[1])*uy
+            if extension<0:
+                lateral=abs((point[0]-a[0])*uy-(point[1]-a[1])*ux)
+                direction_projection=(lateral,extension,0,None)
+        announced=False
+        if direction_projection:
+            announced=self.check_direction(point,now,direction_projection[1],direction_projection[0])
+        if self.wrong_way:
+            self.progress=max(0,direction_projection[1])
+            future={c.id for c in self.cues if c.at>=self.progress-6/self.scale}
+            self.spoken.difference_update(future|{'along-'+id for id in future})
+            return {'state':'wrongway','text':'请安全掉头','cue':Cue('wrongway',self.progress,'uturn'),
+                    'speech':'行驶方向相反，请在安全位置掉头' if announced else None,
+                    'remaining':max(0,(self.route.length-self.progress)*self.scale),'leg':self.leg,'lap':self.lap}
         projection = nearest_on_route(point, self.route.points, max(0,self.progress-25/self.scale), upper)
         if projection is None:
             return {'state':'offroute','text':'偏离路线，请检查定位或重新规划','speech':None}
@@ -250,6 +325,17 @@ class Navigator:
             text=cue_text(announcement,mode,spoken=True)
             if mode=='normal':
                 speech=f'前方{distance_text(speech_distance,self.calibrated)}，{text}' if speech_distance>=15 else text
+                chain=[announcement]
+                if announcement.id.startswith('junction-'):
+                    for following in candidates[1:max(1,min(3,int(self.settings.get('normal_chain_count',2))))]:
+                        if not following.id.startswith('junction-') or (following.at-chain[-1].at)*self.scale>lead:break
+                        chain.append(following)
+                if len(chain)>1:
+                    speech=(f'前方{distance_text(speech_distance,self.calibrated)}，' if speech_distance>=15 else '')+'第一个'+text
+                    for index,following in enumerate(chain[1:],1):
+                        gap=(following.at-chain[index-1].at)*self.scale
+                        speech+='，再行驶'+distance_text(gap,self.calibrated)+'，第'+'一二三'[index]+'个'+cue_text(following,mode,spoken=True)
+                        self.spoken.add(following.id)
             else:
                 speech=(distance_text(speech_distance,self.calibrated)+'，' if speech_distance>=15 else '')+text
                 previous=announcement
@@ -260,12 +346,15 @@ class Navigator:
                         speech+=('，接，' if gap<25 else '，'+distance_text(gap,self.calibrated)+'，')+cue_text(following,mode,spoken=True)
                         self.spoken.add(following.id)
                     previous=following
-        elif mode=='normal' and to_cue>lead and 'along-'+cue.id not in self.spoken:
+        elif mode=='normal' and cue.id not in self.spoken and to_cue>lead and 'along-'+cue.id not in self.spoken:
             self.spoken.add('along-'+cue.id)
             speech='沿当前道路行驶'+distance_text(to_cue,self.calibrated)
         text=cue_text(cue,mode)
-        if mode=='normal' and to_cue>lead:text='沿当前道路行驶'
-        return {'state':'navigating','cue':cue,'text':text,'next_text':cue_text(cue,mode),
+        if mode=='normal' and cue.id not in self.spoken and to_cue>lead:text='沿当前道路行驶'
+        next_text=cue_text(cue,mode)
+        if mode=='normal' and len(candidates)>1 and candidates[1].id in self.spoken:
+            next_text='随后'+distance_text((candidates[1].at-cue.at)*self.scale,self.calibrated)+'，'+cue_text(candidates[1],mode)
+        return {'state':'navigating','cue':cue,'text':text,'next_text':next_text,
                 'distance':to_cue,'remaining':remaining,'speech':speech,'speed':self.speed,
                 'inferred':cue.inferred,'leg':self.leg,'lap':self.lap,
                 'upcoming':[{'cue':c,'distance':max(0,(c.at-self.progress)*self.scale)} for c in candidates[:3]]}

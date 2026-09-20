@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QHBoxLayout,QVBo
     QGroupBox,QFileDialog,QMessageBox,QInputDialog,QDialog,QSplitter,QFrame)
 from PySide6.QtTextToSpeech import QTextToSpeech
 from .model import (asset_path,user_dir,atomic_json,default_settings,load_settings,read_project,
-                    validate_project,upgrade_road_data,uid,KINDS,NOTE_TYPES)
+                    validate_project,upgrade_road_data,uid,KINDS,NOTE_TYPES,ROAD_PREFERENCES)
 from .vision import Fix
 from . import __version__
 from .routing import plan,RouteError,distance,bearing,nearest_on_route,distance_to_roads
@@ -232,10 +232,14 @@ class MainWindow(QMainWindow,GameMapController):
         arrival=QFormLayout();self.arrival_radius=number(self.settings['arrival_m'],5,1000)
         self.arrival_radius.valueChanged.connect(lambda v:self.set_setting('arrival_m',v));arrival.addRow('到达范围 (m)',self.arrival_radius);target.addLayout(arrival)
         target.addWidget(self.text('进入目标点范围并连续定位确认后即算到达，去程与返程都生效。未标定比例时按地图单位计算。',True))
-        rules=self.group('路线规则',layout);self.kind_checks={}
+        rules=self.group('道路偏好',layout);self.kind_preferences={};rf=QFormLayout()
         for key,label in KINDS.items():
-            check=QCheckBox('允许'+label);check.setChecked(key in self.project['policy']['allowed']);check.toggled.connect(self.change_policy);self.kind_checks[key]=check;rules.addWidget(check)
-        rules.addWidget(self.text('野地/越野默认关闭；地图无法判断地雷或实时障碍。',True))
+            choice=QComboBox()
+            for value,name in ROAD_PREFERENCES.items():choice.addItem(name,value)
+            choice.setCurrentIndex(choice.findData(self.project['policy']['preferences'][key]))
+            choice.currentIndexChanged.connect(self.change_policy);self.kind_preferences[key]=choice;rf.addRow(label,choice)
+        rules.addLayout(rf)
+        rules.addWidget(self.text('优先选择喜欢的道路，必要时仍可经过其它类型接驳；尽量避开不会断开路网。危险区仍禁止通行。',True))
         controls=self.group('导航与播报',layout)
         self.mode=QComboBox();self.mode.addItem('常规导航','normal');self.mode.addItem('WRC 路书','wrc');self.mode.setCurrentIndex(self.mode.findData(self.settings['mode']));self.mode.currentIndexChanged.connect(self.change_mode);controls.addWidget(self.mode)
         self.route_label=self.text('路线尚未规划',True);controls.addWidget(self.route_label)
@@ -309,12 +313,26 @@ class MainWindow(QMainWindow,GameMapController):
         overlay.addLayout(of)
         self.overlay_status=self.text('实时导航时显示；自动跟随截图区域、缩放及旋转。路径窗口不接收鼠标输入。',True);overlay.addWidget(self.overlay_status)
         self.build_game_map_settings(layout)
-        speech=self.group('语音与提前量',layout)
+        self.navigation_fields={}
+        for title,fields in [
+            ('常规导航设置',[('lead_m','提前距离 (m)',0,1500,0),('lead_s','车速提前 (s)',0,20,1),('normal_chain_count','连续路口最多播报 (个)',1,3,0)]),
+            ('WRC 路书设置',[('wrc_lead_m','提前距离 (m)',0,1500,0),('wrc_lead_s','车速提前 (s)',0,20,1),('wrc_chain_m','连读间隔 (m)',0,300,0)]),
+            ('通用驾驶提示',[('road_tolerance_m','道路附近范围 (m)',5,200,0),('offroute_m','偏航重算阈值 (m)',20,500,0)])]:
+            group=self.group(title,layout);form=QFormLayout()
+            for key,label,lo,hi,decimals in fields:
+                w=number(self.settings[key],lo,hi,decimals);w.valueChanged.connect(lambda value,k=key:self.set_setting(k,value));form.addRow(label,w);self.navigation_fields[key]=w
+            group.addLayout(form)
+            if title=='常规导航设置':
+                self.bends_check=QCheckBox('提醒道路自然弯曲');self.bends_check.setChecked(self.settings['normal_bends']);self.bends_check.toggled.connect(lambda v:self.set_setting('normal_bends',v));group.addWidget(self.bends_check)
+                group.addWidget(self.text('提前量 = 距离 + 车速 × 秒数。相邻路口间距在提前量以内时一起播报；设为 1 个可关闭连读。',True))
+            elif title=='通用驾驶提示':
+                self.wrong_way_check=QCheckBox('持续反向行驶时提醒安全掉头');self.wrong_way_check.setChecked(self.settings['wrong_way_alert']);self.wrong_way_check.toggled.connect(lambda v:self.set_setting('wrong_way_alert',v));group.addWidget(self.wrong_way_check)
+        speech=self.group('离线语音',layout)
         self.voice_check=QCheckBox('启用离线语音');self.voice_check.setChecked(self.settings['voice']);self.voice_check.toggled.connect(self.change_voice);speech.addWidget(self.voice_check)
         self.voice_combo=QComboBox();self.voice_combo.currentIndexChanged.connect(self.select_voice);speech.addWidget(self.voice_combo)
         self.voice_status=self.text('读取系统语音…',True);speech.addWidget(self.voice_status)
         sf=QFormLayout()
-        for key,label,lo,hi,decimals in [('lead_m','常规提前距离 (m)',0,1500,0),('lead_s','常规车速提前 (s)',0,20,1),('wrc_lead_m','WRC 提前距离 (m)',0,1500,0),('wrc_lead_s','WRC 车速提前 (s)',0,20,1),('wrc_chain_m','WRC 连读间隔 (m)',0,300,0),('road_tolerance_m','道路附近范围 (m)',5,200,0),('offroute_m','偏航重算阈值 (m)',20,500,0),('voice_rate','语速 (-1 慢 / 1 快)',-1,1,1)]:
+        for key,label,lo,hi,decimals in [('voice_rate','语速 (-1 慢 / 1 快)',-1,1,1)]:
             w=number(self.settings[key],lo,hi,decimals);w.valueChanged.connect(lambda value,k=key:self.set_setting(k,value));sf.addRow(label,w)
         speech.addLayout(sf);speech.addWidget(self.button('试听当前模式',self.test_voice))
         hud=self.group('导航图标',layout);hf=QFormLayout();self.hud_fields={}
@@ -780,12 +798,12 @@ class MainWindow(QMainWindow,GameMapController):
         self.project=self.history.pop();self.favorite_trip=None;self.sync_policy();self.changed();self.update_scale_label();self.notify('已撤销上一步')
 
     def sync_policy(self):
-        for k,w in self.kind_checks.items():w.blockSignals(True);w.setChecked(k in self.project['policy']['allowed']);w.blockSignals(False)
+        for k,w in self.kind_preferences.items():w.blockSignals(True);w.setCurrentIndex(w.findData(self.project['policy']['preferences'][k]));w.blockSignals(False)
         self.roundtrip.blockSignals(True);self.roundtrip.setChecked(self.project['roundtrip']);self.roundtrip.blockSignals(False)
 
     def change_policy(self):
-        if not hasattr(self,'kind_checks'):return
-        self.snapshot();self.project['policy']={'allowed':[k for k,w in self.kind_checks.items() if w.isChecked()],'confirmed_only':False};self.project['roundtrip']=self.roundtrip.isChecked();self.changed()
+        if not hasattr(self,'kind_preferences'):return
+        self.snapshot();self.project['policy']={'allowed':list(KINDS),'preferences':{k:w.currentData() for k,w in self.kind_preferences.items()},'confirmed_only':False};self.project['roundtrip']=self.roundtrip.isChecked();self.changed()
 
     def choose_destination(self,index):
         if index>0:self.snapshot();self.detach_favorite();self.project['destination']=list(self.project['destinations'][index-1]['point']);self.changed()
@@ -846,13 +864,13 @@ class MainWindow(QMainWindow,GameMapController):
                     self.route=follow_saved(self.project['roads'],trip,p,self.project['avoid'],current,returning) if current is not None else self.full_route
                     if self.project['start'] is not None and not preview_full:self.favorite_trip=trip
             else:
-                self.route=plan(self.project['roads'],anchors,p['allowed'],p['confirmed_only'],self.project['avoid'])
+                self.route=plan(self.project['roads'],anchors,p['allowed'],p['confirmed_only'],self.project['avoid'],preferences=p.get('preferences'))
                 self.full_route=self.route
                 if self.project['start'] is not None:
                     full_anchors=[self.project['start'],*self.project['waypoints'],self.project['destination']]
                     if returning:full_anchors.reverse()
                     if full_anchors!=anchors:
-                        try:self.full_route=plan(self.project['roads'],full_anchors,p['allowed'],p['confirmed_only'],self.project['avoid'])
+                        try:self.full_route=plan(self.project['roads'],full_anchors,p['allowed'],p['confirmed_only'],self.project['avoid'],preferences=p.get('preferences'))
                         except RouteError:complete=False
         except RouteError as error:
             self.route=None;self.full_route=None;self.route_label.setText(str(error));self.refresh_map()
@@ -875,7 +893,7 @@ class MainWindow(QMainWindow,GameMapController):
         scale=self.project['meters_per_pixel'] or 1
         lists={}
         for mode,label in [('normal','常规 · 路口与沿路距离'),('wrc','WRC · 连续路书')]:
-            listing=QListWidget();cues=cues_for(self.route,self.project['notes'],mode,scale)
+            listing=QListWidget();cues=cues_for(self.route,self.project['notes'],mode,scale,self.settings)
             if mode=='normal' and cues:listing.addItem('起步：沿当前道路行驶'+distance_text(cues[0].at*scale,self.project['meters_per_pixel'] is not None))
             for cue in cues:
                 listing.addItem(f'{cue.at*scale:.0f} '+('m' if self.project['meters_per_pixel'] else '单位')+'  ·  '+cue_text(cue,mode,spoken=True)+('  [估算]' if cue.inferred else ''))
@@ -999,7 +1017,7 @@ class MainWindow(QMainWindow,GameMapController):
             data=self.navigator.update([fix.x,fix.y],now,self.road_gap([fix.x,fix.y]))
             if data:
                 self.set_hud(data)
-                if data.get('state') in ('offroute','waiting_road'):self.tts.stop()
+                if data.get('state') in ('offroute','waiting_road') or (data.get('state')=='wrongway' and data.get('speech')):self.tts.stop()
                 if data.get('speech'):self.speak(data['speech'])
                 if data.get('state')=='turnaround':self.next_leg()
                 if data.get('replan'):self.replan_navigation()
@@ -1082,6 +1100,9 @@ class MainWindow(QMainWindow,GameMapController):
     def set_setting(self,key,value):
         self.settings[key]=value
         if key=='voice_rate':self.tts.setRate(value)
+        if key=='normal_bends' and self.navigator.active:
+            self.navigator.cues=cues_for(self.navigator.route,self.project['notes'],self.settings['mode'],self.project['meters_per_pixel'] or 1,self.settings)
+        if key=='wrong_way_alert':self.navigator.reset_direction()
         self.save_settings()
 
     def set_main_topmost(self,value):
@@ -1124,7 +1145,7 @@ class MainWindow(QMainWindow,GameMapController):
     def change_mode(self):
         self.settings['mode']=self.mode.currentData();self.tts.stop();self.save_settings()
         if self.navigator.active:
-            self.navigator.cues=cues_for(self.navigator.route,self.project['notes'],self.settings['mode'],self.project['meters_per_pixel'] or 1);self.navigator.spoken.clear()
+            self.navigator.cues=cues_for(self.navigator.route,self.project['notes'],self.settings['mode'],self.project['meters_per_pixel'] or 1,self.settings);self.navigator.spoken.clear()
             self.set_hud({'state':'idle','text':'WRC 路书' if self.settings['mode']=='wrc' else '常规导航'})
         else:self.set_hud({'state':'idle','text':'等待导航'})
 

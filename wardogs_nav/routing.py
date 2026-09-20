@@ -77,7 +77,7 @@ def distance_to_roads(point, roads, allowed, avoid=(), extra_route=None):
     return best
 
 
-def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45.):
+def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45., preferences=None):
     if len(anchors) < 2:
         raise RouteError('请先设置目的地并完成定位')
     if not allowed:
@@ -139,6 +139,9 @@ def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_sna
         node_buckets.setdefault((gx,gy),[]).append(len(nodes)-1)
         return len(nodes)-1
     factors = {'major': 1., 'minor': 1.18, 'offroad': 1.6}
+    if preferences:
+        factors={kind:weight*{'prefer':.5,'normal':1.,'avoid':4.}[preferences.get(kind,'normal')]
+                 for kind,weight in factors.items()}
     for (_, _, road), divisions in zip(segments, splits):
         division_nodes = [node(p) for _, p in sorted(divisions, key=lambda item: item[0])]
         for u, v in zip(division_nodes, division_nodes[1:]):
@@ -151,8 +154,8 @@ def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_sna
     return nodes, adjacency, anchor_ids, gaps
 
 
-def plan(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45.):
-    nodes, adjacency, anchor_ids, gaps = build_graph(roads, anchors, allowed, confirmed_only, avoid, max_snap)
+def plan(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45., preferences=None):
+    nodes, adjacency, anchor_ids, gaps = build_graph(roads, anchors, allowed, confirmed_only, avoid, max_snap, preferences)
     route_nodes, route_roads = [], []
     for start, end in zip(anchor_ids, anchor_ids[1:]):
         queue, costs, previous = [(0, start)], {start: 0}, {}

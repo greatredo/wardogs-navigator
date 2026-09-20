@@ -21,6 +21,36 @@ def test_road_filters_are_hard_constraints(roads):
     assert legacy.points==field.points and legacy.unconfirmed==0
 
 
+def test_road_preferences_allow_short_connectors_and_choose_preferred_type():
+    roads=[road('in',[[0,0],[10,0]]),road('field',[[10,0],[90,0]],'offroad'),
+           road('out',[[90,0],[100,0]],'minor'),road('paved',[[10,0],[10,20],[90,20],[90,0]])]
+    kinds=['major','minor','offroad']
+    preferences=dict(major='avoid',minor='avoid',offroad='prefer')
+    r=plan(roads,[[0,0],[100,0]],kinds,preferences=preferences)
+    assert r.length==100 and r.road_ids==['in','field','out']
+    preferences.update(major='prefer',minor='normal',offroad='avoid')
+    r=plan(roads,[[0,0],[100,0]],kinds,preferences=preferences)
+    assert 'field' not in r.road_ids and r.length==140
+    # Avoidance remains soft even when every road has that setting.
+    r=plan(roads[:3],[[0,0],[100,0]],kinds,preferences={k:'avoid' for k in kinds})
+    assert r.length==100
+    zone={'point':[50,0],'radius':5}
+    r=plan(roads,[[0,0],[100,0]],kinds,avoid=[zone],preferences=dict(major='avoid',minor='avoid',offroad='prefer'))
+    assert 'field' not in r.road_ids and all(not blocked(a,b,zone) for a,b in zip(r.points,r.points[1:]))
+
+
+def test_legacy_road_policy_migrates_to_soft_preferences_without_changing_data():
+    p=read_project(asset_path('default_project.json'))
+    p['policy']={'allowed':['offroad'],'confirmed_only':False};before=deepcopy(p)
+    migrated=validate_project(p)
+    assert p==before and migrated['roads']==p['roads']
+    assert set(migrated['policy']['allowed'])=={'major','minor','offroad'}
+    assert migrated['policy']['preferences']==dict(major='avoid',minor='avoid',offroad='normal')
+    assert validate_project(migrated)==migrated
+    migrated['policy']['preferences']['major']='unknown'
+    with pytest.raises(ValueError,match='道路偏好'):validate_project(migrated)
+
+
 @pytest.mark.parametrize('zone',[{'point':[50,0],'radius':10},{'shape':'rect','point':[50,0],'width':20,'height':20}])
 def test_danger_regions_force_detour(roads,zone):
     route=plan(roads,[[0,0],[100,0]],['major','minor'],avoid=[zone]);assert route.length==200

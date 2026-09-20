@@ -42,6 +42,30 @@ def test_drag_rectangle_replans_real_map(window,app):
     window.undo();assert not window.project['avoid']
 
 
+def test_navigation_settings_and_soft_road_preferences_survive_restart(window,tmp_path):
+    from PySide6.QtWidgets import QGroupBox
+    from wardogs_nav.model import load_settings
+    titles={g.title() for g in window.findChildren(QGroupBox)}
+    assert {'常规导航设置','WRC 路书设置','通用驾驶提示'}<=titles
+    window.navigation_fields['lead_m'].setValue(240)
+    window.navigation_fields['normal_chain_count'].setValue(3)
+    window.bends_check.setChecked(False);window.wrong_way_check.setChecked(False)
+    loaded=load_settings()
+    assert loaded['lead_m']==240 and loaded['normal_chain_count']==3
+    assert not loaded['normal_bends'] and not loaded['wrong_way_alert']
+    window.project['destination']=None;window.fix=None
+    window.kind_preferences['offroad'].setCurrentIndex(window.kind_preferences['offroad'].findData('prefer'))
+    window.kind_preferences['major'].setCurrentIndex(window.kind_preferences['major'].findData('avoid'))
+    window.save_project()
+    restored=MainWindow(start_worker=False)
+    try:
+        assert restored.kind_preferences['offroad'].currentData()=='prefer'
+        assert restored.kind_preferences['major'].currentData()=='avoid'
+        assert set(restored.project['policy']['allowed'])=={'major','minor','offroad'}
+        assert restored.navigation_fields['lead_m'].value()==240
+    finally:restored.close()
+
+
 def test_drag_destination_changes_config_and_route(window,app):
     assert window.plan_route()
     window.move_item(('destination',0),[194,211]);app.processEvents()

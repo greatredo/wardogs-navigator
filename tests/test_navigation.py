@@ -36,18 +36,19 @@ def test_speech_is_deduplicated_and_lead_adjustable():
     nav.stop();assert nav.update([0,0],3) is None
 
 
-def test_normal_curves_silent_but_physical_junctions_have_turn_and_straight():
+def test_normal_bends_are_distinct_from_physical_junctions():
     from wardogs_nav.routing import plan
     def road(id,points):return dict(id=id,points=points,kind='major',confirmed=True)
     main=road('main',[[0,100],[0,50],[0,0],[100,0]])
     smooth=plan([main],[[0,100],[100,0]],['major'])
-    assert [c.kind for c in cues_for(smooth,[],'normal')]==['arrival']
+    assert [c.kind for c in cues_for(smooth,[],'normal')]==['bend_right','arrival']
+    assert [c.kind for c in cues_for(smooth,[],'normal',settings={'normal_bends':False})]==['arrival']
     assert any(c.kind=='square_right' for c in cues_for(smooth,[],'wrc'))
     with_junctions=plan([main,road('side',[[0,50],[70,50]]),road('out',[[0,0],[-50,0]])],[[0,100],[100,0]],['major'])
     assert [c.kind for c in cues_for(with_junctions,[],'normal')]==['straight','right','arrival']
     # Road-ID changes at a degree-two join are still the same continuous road.
     split=plan([road('a',[[0,100],[0,0]]),road('b',[[0,0],[100,0]])],[[0,100],[100,0]],['major'])
-    assert [c.kind for c in cues_for(split,[],'normal')]==['arrival']
+    assert [c.kind for c in cues_for(split,[],'normal')]==['bend_right','arrival']
 
 
 def test_wrc_smooth_curve_is_one_note_and_grade_density_independent():
@@ -121,6 +122,91 @@ def test_lost_fix_does_not_advance_or_retain_speed():
     nav=Navigator();nav.start(route([[0,0],[100,0]]),[],default_settings(),1)
     nav.update([0,0],0);nav.update([20,0],1);progress=nav.progress;nav.lost()
     assert nav.progress==progress and nav.speed==0 and nav.last_point is None
+
+
+def test_normal_chains_close_junctions_without_along_message_between_them():
+    r=route([[0,0],[200,0],[300,0],[300,300]])
+    r.junctions=[dict(at=200,delta=0),dict(at=300,delta=90)]
+    settings=default_settings();settings.update(lead_m=150,lead_s=0)
+    nav=Navigator();nav.start(r,[],settings,1)
+    data=nav.update([100,0],0)
+    assert data['speech']=='前方100米，第一个路口直行，再行驶100米，第二个路口右转'
+    assert data['next_text']=='随后100米，路口右转'
+    assert nav.update([160,0],1)['speech'] is None
+    after=nav.update([220,0],2)
+    assert after['speech'] is None and after['text']=='路口右转'
+    assert nav.update([260,0],3)['speech'] is None
+
+
+def test_normal_chain_count_and_speed_adjusted_lead():
+    r=route([[0,0],[800,0]]);r.junctions=[dict(at=x,delta=0) for x in (200,310,420)]
+    settings=default_settings();settings.update(lead_m=100,lead_s=0,normal_chain_count=3)
+    nav=Navigator();nav.start(r,[],settings,1)
+    assert '第二个' not in nav.update([110,0],0)['speech']
+    settings['lead_m']=120;nav.start(r,[],settings,1)
+    assert '第三个路口' in nav.update([110,0],0)['speech']
+    settings['normal_chain_count']=1;nav.start(r,[],settings,1)
+    assert '第二个' not in nav.update([110,0],0)['speech']
+    settings.update(lead_m=20,lead_s=4,normal_chain_count=2);nav.start(r,[],settings,1)
+    nav.update([0,0],0)
+    assert '第二个路口' in nav.update([80,0],1)['speech']
+
+
+def test_normal_bend_warning_has_direction_and_can_be_disabled():
+    r=route([[0,0],[200,0],[200,250]])
+    settings=default_settings();settings.update(lead_m=100,lead_s=0)
+    nav=Navigator();nav.start(r,[],settings,1)
+    data=nav.update([100,0],0)
+    assert '道路向右弯曲，请减速' in data['speech']
+    assert nav.update([110,0],1)['speech'] is None
+    assert any(c.kind=='bend_left' for c in cues_for(r.reversed(),[],'normal'))
+    settings['normal_bends']=False;nav.start(r,[],settings,1)
+    assert '弯曲' not in nav.update([100,0],0)['speech']
+
+
+@pytest.mark.parametrize('mode',['normal','wrc'])
+def test_wrong_way_warns_once_and_recovers_without_losing_trip(mode):
+    nav=Navigator();settings=default_settings();settings['mode']=mode
+    r=route([[0,0],[1000,0]]);nav.start(r,[],settings,1,True)
+    nav.lap=1;nav.leg='返程'
+    assert nav.update([500,0],0)['state']=='navigating'
+    assert nav.update([490,0],1)['state']=='navigating'
+    data=nav.update([480,0],2)
+    assert data['state']=='wrongway' and data['cue'].kind=='uturn' and '安全位置掉头' in data['speech']
+    assert nav.update([470,0],3)['speech'] is None
+    assert nav.update([480,0],4)['state']=='wrongway'
+    assert nav.update([490,0],5)['state']=='navigating'
+    assert nav.active and nav.roundtrip and nav.route is r and nav.lap==1 and nav.goal==[1000,0]
+
+
+def test_wrong_way_ignores_jitter_brief_reversing_gaps_and_offroad():
+    nav=Navigator();settings=default_settings();r=route([[0,0],[1000,0]])
+    for samples in [[(500,0),(498,1),(501,2),(497,3),(502,4)],
+                    [(500,0),(490,1),(500,2),(510,3)],
+                    [(500,0),(480,5),(450,10)]]:
+        nav.start(r,[],settings,1)
+        for x,t in samples:assert nav.update([x,0],t)['state']!='wrongway'
+    nav.start(r,[],settings,1)
+    for t in range(4):assert nav.update([500-t*10,60],t,60)['state']=='waiting_road'
+    settings['wrong_way_alert']=False;nav.start(r,[],settings,1)
+    for t in range(4):assert nav.update([500-t*10,0],t)['state']!='wrongway'
+
+
+def test_following_hairpin_is_not_wrong_way():
+    r=route([[0,0],[100,0],[100,30],[0,30]])
+    nav=Navigator();nav.start(r,[],default_settings(),1)
+    for t,p in enumerate([[60,0],[80,0],[100,0],[100,15],[100,30],[80,30],[60,30]]):
+        assert nav.update(p,t)['state']!='wrongway'
+
+
+def test_starting_in_opposite_direction_warns_behind_first_route_point():
+    nav=Navigator();nav.start(route([[500,100],[1500,100]]),[],default_settings(),1)
+    nav.update([500,100],0,0)
+    assert nav.update([460,100],1,0)['state']=='navigating'
+    data=nav.update([420,100],2,0)
+    assert data['state']=='wrongway' and data['remaining']==1000 and nav.progress==0
+    assert nav.update([400,100],3,0)['speech'] is None
+    assert nav.update([450,100],4,0)['state']!='wrongway'
 
 
 def test_offroute_waits_for_three_fixes():

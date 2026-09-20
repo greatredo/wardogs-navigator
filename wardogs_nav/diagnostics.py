@@ -91,10 +91,27 @@ def run_selftest(output):
         report['checks']['missing_roads_added_once']=first==2 and second==0 and {r['kind'] for r in roads}=={'minor','offroad'}
         simple=[dict(id='line',name='道路',points=[[100,100],[200,100],[200,200]],kind='major',confirmed=True)]
         bend=plan(simple,[[100,100],[200,200]],['major'])
-        report['checks']['normal_bend_is_silent']=[c.kind for c in cues_for(bend,[],'normal')]==['arrival']
+        report['checks']['normal_bend_alert']=[c.kind for c in cues_for(bend,[],'normal')]==['bend_right','arrival']
         simple.append(dict(id='branch',name='岔路',points=[[200,100],[300,100]],kind='major',confirmed=True))
         junction=plan(simple,[[100,100],[200,200]],['major'])
         report['checks']['normal_junction_cue']=cues_for(junction,[],'normal')[0].kind=='right'
+        consecutive=Route([[0,0],[800,0]],['major'],['fixture'],800,[0,0],0,[dict(at=200,delta=0),dict(at=300,delta=90)])
+        normal_settings=dict(window.settings,mode='normal',lead_m=150,lead_s=0,normal_chain_count=2)
+        check_nav.start(consecutive,[],normal_settings,1)
+        report['normal_speech']=check_nav.update([100,0],0)['speech']
+        report['checks']['normal_junction_chain']='第二个路口右转' in report['normal_speech']
+        check_nav.start(consecutive,[],normal_settings,1)
+        check_nav.update([500,0],0);check_nav.update([490,0],1)
+        wrongway=check_nav.update([480,0],2)
+        report['checks']['wrong_way_alert']=wrongway['state']=='wrongway' and '掉头' in wrongway['speech']
+        window.hud.set_data(wrongway);window.hud.show();app.processEvents()
+        window.hud.grab().save(str(output.with_name(output.stem+'-wrongway.png')))
+        window.hud.hide()
+        mixed=[dict(id='in',kind='major',points=[[0,0],[10,0]]),dict(id='field',kind='offroad',points=[[10,0],[90,0]]),dict(id='out',kind='minor',points=[[90,0],[100,0]])]
+        soft=plan(mixed,[[0,0],[100,0]],['major','minor','offroad'],preferences=dict(major='avoid',minor='avoid',offroad='prefer'))
+        report['checks']['soft_road_connectors']=soft.length==100 and set(soft.kinds)=={'major','minor','offroad'}
+        window.navigation_fields['normal_chain_count'].setValue(3)
+        report['checks']['normal_settings_controls']=window.settings['normal_chain_count']==3
         wrc_settings=dict(window.settings,mode='wrc',wrc_lead_m=150.,wrc_lead_s=0.)
         notes=[dict(id='left',point=[150,100],type='left',grade=3,direction='forward',bearing=90),
                dict(id='brake',point=[170,100],type='hard_brake',grade=1,direction='forward',bearing=90),

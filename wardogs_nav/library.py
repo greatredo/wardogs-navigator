@@ -24,7 +24,7 @@ def snap_saved(roads,saved,policy,avoid=(),max_snap=80.):
     if 'control_points' not in saved and len(controls)>2:
         import cv2,numpy as np
         guides=cv2.approxPolyDP(np.float32(controls),2.,False)[:,0].tolist()
-    try:route=plan(roads,guides,policy['allowed'],policy['confirmed_only'],avoid,max_snap=max_snap)
+    try:route=plan(roads,guides,policy['allowed'],policy['confirmed_only'],avoid,max_snap=max_snap,preferences=policy.get('preferences'))
     except RouteError as error:raise RouteError('无法贴合道路：'+str(error)) from error
     result=deepcopy(saved)
     result.update(points=[list(p) for p in route.points],kinds=list(route.kinds),
@@ -154,7 +154,7 @@ def follow_saved(roads, saved, policy, avoid=(), start=None, reverse=False, mini
         if projection is None:raise RouteError('无法接入收藏路线')
         gap,s,_,q=projection
         if gap>1.5:
-            connector=plan(roads,[start,q],policy['allowed'],policy['confirmed_only'],avoid)
+            connector=plan(roads,[start,q],policy['allowed'],policy['confirmed_only'],avoid,preferences=policy.get('preferences'))
         route=slice_route(route,s,route.length)
         if route.length<1:raise RouteError('已在收藏路线终点附近；可反向载入')
     if any(blocked(p,p,z) for p in (route.points[0],route.points[-1]) for z in avoid):
@@ -179,7 +179,7 @@ def follow_saved(roads, saved, policy, avoid=(), start=None, reverse=False, mini
                 a=before[min(radius,len(before)-1)];b=after[min(radius,len(after)-1)]
                 try:
                     detour=plan(roads,[point_at(route.points,lengths,a),point_at(route.points,lengths,b)],
-                                policy['allowed'],policy['confirmed_only'],avoid,max_snap=2.)
+                                policy['allowed'],policy['confirmed_only'],avoid,max_snap=2.,preferences=policy.get('preferences'))
                     break
                 except RouteError:continue
             if detour is None:raise RouteError('危险区截断了收藏路径，附近没有符合规则的绕行道路')
