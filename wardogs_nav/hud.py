@@ -7,7 +7,6 @@ from .model import MODIFIERS
 
 
 def draw_symbol(p, rect, kind, color):
-    if kind.startswith('bend_'):kind=kind.removeprefix('bend_')
     p.save()
     p.translate(rect.center())
     size=min(rect.width(),rect.height())/80

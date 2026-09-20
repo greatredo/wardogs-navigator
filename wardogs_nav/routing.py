@@ -24,6 +24,17 @@ def angle_delta(a, b):
     return (b-a+180) % 360 - 180
 
 
+def bridge_ports(road):
+    if not road.get('bridge',False):return []
+    return [road['points'][index] for key,index in (('bridge_start',0),('bridge_end',-1)) if road.get(key,False)]
+
+
+def roads_connect(a,b,point,ports=None):
+    if bool(a.get('bridge'))==bool(b.get('bridge')):return True
+    if ports is None:ports=bridge_ports(a)+bridge_ports(b)
+    return any(distance(point,p)<1.5 for p in ports)
+
+
 def blocked(a, b, zone):
     if zone.get('shape') != 'rect':
         return project(zone['point'], a, b)[0] <= zone['radius']
@@ -49,12 +60,15 @@ class Route:
     snap_distances: list
     unconfirmed: int
     junctions: list = field(default_factory=list)
+    bridges: list = field(default_factory=list)
+    bridge_connections: list = field(default_factory=list)
 
     def reversed(self):
         return Route(list(reversed(self.points)), list(reversed(self.kinds)),
                      list(reversed(self.road_ids)), self.length,
                      list(reversed(self.snap_distances)), self.unconfirmed,
-                     [dict(j, at=self.length-j['at'], delta=-j['delta']) for j in reversed(self.junctions)])
+                     [dict(j, at=self.length-j['at'], delta=-j['delta']) for j in reversed(self.junctions)],
+                     list(reversed(self.bridges)),list(self.bridge_connections))
 
 
 class RouteError(ValueError):
@@ -77,7 +91,7 @@ def distance_to_roads(point, roads, allowed, avoid=(), extra_route=None):
     return best
 
 
-def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45., preferences=None):
+def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45., preferences=None, anchor_roads=None):
     if len(anchors) < 2:
         raise RouteError('请先设置目的地并完成定位')
     if not allowed:
@@ -93,6 +107,7 @@ def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_sna
     if not segments:
         raise RouteError('当前规则下没有可用道路；可检查道路分类与避让区')
     splits = [[(0., a), (1., b)] for a, b, _ in segments]
+    ports=[p for road in roads for p in bridge_ports(road)]
     # A spatial index keeps image-derived road networks responsive. It does not
     # connect intersections: the same explicit-vertex rule is evaluated below.
     buckets={};cell=24.
@@ -102,20 +117,23 @@ def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_sna
                 buckets.setdefault((gx,gy),[]).append(j)
     # Connect explicit vertices close to segment interiors. Geometric crossings
     # alone do NOT imply a junction (bridges and underpasses remain separate).
-    for i, (a, b, _) in enumerate(segments):
+    for i, (a, b, road) in enumerate(segments):
         for p in (a, b):
             for j in buckets.get((math.floor(p[0]/cell),math.floor(p[1]/cell)),[]):
                 if i == j:
                     continue
-                c,d,_=segments[j]
+                c,d,other=segments[j]
+                if not roads_connect(road,other,p,ports):continue
                 gap, q, t = project(p, c, d)
                 if gap < 1.5:
                     splits[j].append((t, p))
     snapped, gaps = [], []
-    for anchor in anchors:
+    for anchor_index,anchor in enumerate(anchors):
         options = []
+        preferred_id=anchor_roads[anchor_index] if anchor_roads else None
         for i,(a,b,road) in enumerate(segments):
             if not usable(road,allowed,confirmed_only):continue
+            if preferred_id is not None and road['id']!=preferred_id:continue
             projection=project(anchor,a,b)
             if not any(blocked(projection[1],projection[1],z) for z in avoid):
                 options.append((projection,i))
@@ -125,37 +143,38 @@ def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_sna
         if gap > max_snap:
             raise RouteError(f'起终点或途经点距可用道路过远（{gap:.0f} 地图像素），请补画连接路或调整位置')
         splits[index].append((t, q))
-        snapped.append(q)
+        snapped.append((q,segments[index][2]))
         gaps.append(gap)
     nodes, adjacency, node_buckets = [], {}, {}
-    def node(p):
+    def node(p,road):
+        level=bool(road.get('bridge')) and not any(distance(p,port)<1.5 for port in ports)
         gx,gy=math.floor(p[0]/1.5),math.floor(p[1]/1.5)
         for dx in (-1,0,1):
             for dy in (-1,0,1):
-                for i in node_buckets.get((gx+dx,gy+dy),[]):
+                for i in node_buckets.get((gx+dx,gy+dy,level),[]):
                     if distance(p,nodes[i])<1.5:return i
         nodes.append(p)
         adjacency[len(nodes)-1] = []
-        node_buckets.setdefault((gx,gy),[]).append(len(nodes)-1)
+        node_buckets.setdefault((gx,gy,level),[]).append(len(nodes)-1)
         return len(nodes)-1
     factors = {'major': 1., 'minor': 1.18, 'offroad': 1.6}
     if preferences:
         factors={kind:weight*{'prefer':.5,'normal':1.,'avoid':4.}[preferences.get(kind,'normal')]
                  for kind,weight in factors.items()}
     for (_, _, road), divisions in zip(segments, splits):
-        division_nodes = [node(p) for _, p in sorted(divisions, key=lambda item: item[0])]
+        division_nodes = [node(p,road) for _, p in sorted(divisions, key=lambda item: item[0])]
         for u, v in zip(division_nodes, division_nodes[1:]):
             if u == v:
                 continue
             weight = distance(nodes[u], nodes[v])*factors[road['kind']]
             adjacency[u].append((v, weight, road))
             adjacency[v].append((u, weight, road))
-    anchor_ids = [node(p) for p in snapped]
+    anchor_ids = [node(p,road) for p,road in snapped]
     return nodes, adjacency, anchor_ids, gaps
 
 
-def plan(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45., preferences=None):
-    nodes, adjacency, anchor_ids, gaps = build_graph(roads, anchors, allowed, confirmed_only, avoid, max_snap, preferences)
+def plan(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45., preferences=None, anchor_roads=None):
+    nodes, adjacency, anchor_ids, gaps = build_graph(roads, anchors, allowed, confirmed_only, avoid, max_snap, preferences, anchor_roads)
     route_nodes, route_roads = [], []
     for start, end in zip(anchor_ids, anchor_ids[1:]):
         queue, costs, previous = [(0, start)], {start: 0}, {}
@@ -189,7 +208,8 @@ def plan(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45., 
         raise RouteError('起点与终点太近，请选择更远的目的地')
     result = Route(points, [r['kind'] for r in route_roads], [r['id'] for r in route_roads],
                  sum(distance(a, b) for a, b in zip(points, points[1:])), gaps,
-                 0)
+                 0,bridges=[bool(r.get('bridge')) for r in route_roads],
+                 bridge_connections=[list(p) for r in {r['id']:r for r in route_roads}.values() for p in bridge_ports(r)])
     result.junctions = junctions_on_route(nodes, adjacency, result)
     return result
 
@@ -243,6 +263,9 @@ def junctions_on_route(nodes, adjacency, route):
         projection = nearest_on_route(nodes[u], route.points)
         if projection is None or projection[0] > 1.5:
             continue
+        # A ground junction may occupy exactly the same 2-D coordinates as the
+        # followed bridge. Only incident roads on this route can form its cues.
+        if route.road_ids[projection[2]] not in {r['id'] for _,_,r in edges}:continue
         s = projection[1]
         if s < 2 or s > route.length-2:
             continue

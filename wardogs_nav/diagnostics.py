@@ -91,15 +91,16 @@ def run_selftest(output):
         report['checks']['missing_roads_added_once']=first==2 and second==0 and {r['kind'] for r in roads}=={'minor','offroad'}
         simple=[dict(id='line',name='道路',points=[[100,100],[200,100],[200,200]],kind='major',confirmed=True)]
         bend=plan(simple,[[100,100],[200,200]],['major'])
-        report['checks']['normal_bend_alert']=[c.kind for c in cues_for(bend,[],'normal')]==['bend_right','arrival']
+        report['checks']['normal_bend_is_silent']=[c.kind for c in cues_for(bend,[],'normal')]==['arrival']
         simple.append(dict(id='branch',name='岔路',points=[[200,100],[300,100]],kind='major',confirmed=True))
         junction=plan(simple,[[100,100],[200,200]],['major'])
         report['checks']['normal_junction_cue']=cues_for(junction,[],'normal')[0].kind=='right'
         consecutive=Route([[0,0],[800,0]],['major'],['fixture'],800,[0,0],0,[dict(at=200,delta=0),dict(at=300,delta=90)])
-        normal_settings=dict(window.settings,mode='normal',lead_m=150,lead_s=0,normal_chain_count=2)
+        normal_settings=dict(window.settings,mode='normal',lead_m=150,lead_s=0)
         check_nav.start(consecutive,[],normal_settings,1)
         report['normal_speech']=check_nav.update([100,0],0)['speech']
-        report['checks']['normal_junction_chain']='第二个路口右转' in report['normal_speech']
+        check_nav.update([160,0],1)
+        report['checks']['normal_individual_junctions']=(report['normal_speech']=='前方100米，路口直行' and check_nav.update([220,0],2)['speech']=='前方80米，路口右转')
         check_nav.start(consecutive,[],normal_settings,1)
         check_nav.update([500,0],0);check_nav.update([490,0],1)
         wrongway=check_nav.update([480,0],2)
@@ -110,8 +111,19 @@ def run_selftest(output):
         mixed=[dict(id='in',kind='major',points=[[0,0],[10,0]]),dict(id='field',kind='offroad',points=[[10,0],[90,0]]),dict(id='out',kind='minor',points=[[90,0],[100,0]])]
         soft=plan(mixed,[[0,0],[100,0]],['major','minor','offroad'],preferences=dict(major='avoid',minor='avoid',offroad='prefer'))
         report['checks']['soft_road_connectors']=soft.length==100 and set(soft.kinds)=={'major','minor','offroad'}
-        window.navigation_fields['normal_chain_count'].setValue(3)
-        report['checks']['normal_settings_controls']=window.settings['normal_chain_count']==3
+        window.navigation_fields['lead_m'].setValue(150)
+        report['checks']['normal_settings_controls']=window.settings['lead_m']==150 and 'normal_chain_count' not in window.navigation_fields
+        deck=dict(id='deck',name='桥梁',kind='major',bridge=True,points=[[100,300],[300,300],[500,300]])
+        ground=dict(id='ground',name='辅路',kind='major',points=[[300,100],[300,300],[300,500]])
+        from .routing import RouteError
+        try:plan([deck,ground],[[100,300],[300,500]],['major']);separated=False
+        except RouteError:separated=True
+        report['checks']['bridge_crossing_no_turn']=separated
+        report['checks']['bridge_crossing_no_junction']=not plan([deck,ground],[[100,300],[500,300]],['major']).junctions
+        from .dialogs import RoadDialog
+        bridge_dialog=RoadDialog(deck,window);bridge_dialog.bridge_start.setChecked(True)
+        report['checks']['bridge_editor_explicit_ports']=bridge_dialog.values()['bridge_start'] and not bridge_dialog.values()['bridge_end']
+        bridge_dialog.show();app.processEvents();bridge_dialog.grab().save(str(output.with_name(output.stem+'-bridge-editor.png')));bridge_dialog.close()
         wrc_settings=dict(window.settings,mode='wrc',wrc_lead_m=150.,wrc_lead_s=0.)
         notes=[dict(id='left',point=[150,100],type='left',grade=3,direction='forward',bearing=90),
                dict(id='brake',point=[170,100],type='hard_brake',grade=1,direction='forward',bearing=90),
