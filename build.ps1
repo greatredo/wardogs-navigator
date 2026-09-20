@@ -17,7 +17,7 @@ $previousBuildPath = $env:PATH
 try {
     $env:PATH = @((Split-Path -Parent $python), $pythonBase,
         (Join-Path $env:SystemRoot 'System32'), $env:SystemRoot) -join [IO.Path]::PathSeparator
-    & $python -m PyInstaller --noconfirm --clean --windowed --onedir --distpath $outputRoot --name WardogsNavigator --add-data 'assets;assets' --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets --exclude-module PySide6.QtWebEngineQuick main.py
+    & $python tools\build_frozen.py --noconfirm --clean --windowed --onedir --distpath $outputRoot --name WardogsNavigator --add-data 'assets;assets' --add-data 'wardogs_audio/assets;wardogs_audio/assets' --add-data 'wardogs_audio/windows_speech.ps1;wardogs_audio' --exclude-module PySide6.QtTextToSpeech --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets --exclude-module PySide6.QtWebEngineQuick main.py
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller 构建失败' }
 } finally {
     $env:PATH = $previousBuildPath

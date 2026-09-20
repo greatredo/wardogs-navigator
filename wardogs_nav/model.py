@@ -17,12 +17,17 @@ NOTE_TYPES = {'left': '左弯', 'right': '右弯', 'straight': '直行',
               'caution': '注意', 'water': '涉水'}
 MODIFIERS = {'long': '长弯', 'tightens': '收紧', 'opens': '放开', 'dont_cut': '别切', 'cut': '可切'}
 
+# Set only by a standalone optional component before loading shared maps.
+ASSET_ROOT = None
+
 
 def uid():
     return uuid.uuid4().hex[:12]
 
 
 def asset_path(name):
+    if ASSET_ROOT is not None:
+        return Path(ASSET_ROOT) / name
     return Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1])) / 'assets' / name
 
 
@@ -45,7 +50,7 @@ def default_settings():
     from .hotkeys import DEFAULT_HOTKEYS
     return {'map_id':'ozeti','capture': {'left': 0, 'top': 0, 'width': 340, 'height': 303},
             'anchor': [.5, .5], 'north_up': True, 'interval_ms': 700,
-            'mode': 'normal', 'voice': True, 'voice_name': '', 'voice_rate': 0.,
+            'mode': 'normal', 'voice': True, 'voice_name': '', 'voice_rate': 0., 'voice_backend': 'auto',
             'lead_m': 100., 'lead_s': 4., 'arrival_m': 25., 'offroute_m': 80.,
             'wrong_way_alert': True,
             'road_tolerance_m': 30.,

@@ -186,8 +186,9 @@ def run_selftest(output):
     def finish():
       try:
         if window:
-            window.load_voices();report['voices']=[v.name() for v in window.voices]
-            report['checks']['system_voice_available']=bool(window.voices)
+            report['voices']=[v['name'] for v in window.voices]
+            from wardogs_audio.pack import DefaultVoicePack
+            report['checks']['default_voice_pack_available']=bool(DefaultVoicePack().segments('前方100米，路口右转'))
             window.hud.set_data({'state':'navigating','text':'前方右转','distance':120,'remaining':2800},'normal')
             window.hud.show();app.processEvents()
             window.hud.grab().save(str(output.with_name(output.stem+'-hud.png')))
@@ -253,15 +254,17 @@ def run_selftest(output):
             report['hotkey_status']=statuses
             window.grab().save(str(output.with_name(output.stem+'-cleared.png')))
             window.navigator.stop();window.watchdog.stop()
-            # Exercise the production speech queue through the native SAPI
-            # engine. Mute this diagnostic so it does not disturb the desktop.
-            window.settings['voice']=True;window.tts.setVolume(0);window.tts.setRate(.5)
+            # Use the shared queue and real player with bundled audio, including
+            # on machines where Windows speech is absent. Output remains muted.
+            window.tts.stop();window.settings['voice']=True
+            window.settings['voice_backend']='local';window.settings['voice_rate']=.5
+            window.tts.volume=0
             report['queue_started']=[];report['checks']['native_speech_queue']=False
             def started(id):report['queue_started'].append(id)
-            def state_changed(state):
-                if state==window.tts.State.Ready and len(report['queue_started'])>=2:
+            def completed(receipt):
+                if len(report['queue_started'])>=2 and window.tts.current is None and not window.tts.queue:
                     report['checks']['native_speech_queue']=True;QTimer.singleShot(0,finish_report)
-            window.tts.aboutToSynthesize.connect(started);window.tts.stateChanged.connect(state_changed)
+            window.tts.started.connect(started);window.tts.completed.connect(completed)
             window.speak('路口直行。');window.speak('左三，接右六。')
             QTimer.singleShot(20000,finish_report)
         else:finish_report()
