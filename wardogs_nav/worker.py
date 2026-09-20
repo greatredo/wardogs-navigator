@@ -1,5 +1,6 @@
 import threading
 import time
+from collections import deque
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 from .vision import Locator, read_image, Fix, MapViewFix
@@ -11,6 +12,7 @@ class CaptureWorker(QThread):
     ready=Signal(str,int)
     failed=Signal(str,str,int)
     map_result=Signal(object,object,object)
+    action_failed=Signal(str)
 
     def __init__(self, settings):
         super().__init__()
@@ -21,7 +23,8 @@ class CaptureWorker(QThread):
         self.map_mask=None
         self.mode='idle'
         self.session=0
-        self.map_action=None
+        self.actions=deque()
+        self.action_lock=threading.Lock()
         self.target_window=0
         self.context=(settings.get('map_id','ozeti'),0)
         self.wake=threading.Event()
@@ -33,12 +36,36 @@ class CaptureWorker(QThread):
         self.wake.set()
 
     def reset_view(self):
-        self.session+=1;self.mode='idle';self.map_action=None;self.map_mask=None;self.target_window=0
+        self.session+=1;self.mode='idle';self.map_mask=None;self.target_window=0
+        with self.action_lock:self.actions.clear()
         self.wake.set()
 
+    @property
+    def map_action(self):
+        with self.action_lock:return self.actions[0] if self.actions else None
+
     def request_action(self,action,point,foreground):
-        self.map_action=(self.session,action,point,foreground,time.monotonic())
+        with self.action_lock:
+            full=len(self.actions)>=8
+            if not full:self.actions.append((self.session,action,point,foreground,time.monotonic()))
+        if full:
+            self.action_failed.emit('待核准操作较多，请稍后再试');return False
         self.wake.set()
+        return True
+
+    def take_actions(self):
+        with self.action_lock:
+            actions=list(self.actions);self.actions.clear()
+        return actions
+
+    def retry_actions(self,actions,foreground):
+        retry=[]
+        for action in actions:
+            if action[0]==self.session and action[3]==foreground and time.monotonic()-action[4]<6:retry.append(action)
+            else:self.action_failed.emit('未能核准鼠标位置，操作已取消；请等待大地图识别恢复后重试')
+        with self.action_lock:
+            pending=retry+list(self.actions);self.actions=deque(pending[:8])
+        if len(pending)>8:self.action_failed.emit('待核准操作较多，最后的操作已取消，请稍后重试')
 
     def request_sample(self,path):
         self.reset_view()
@@ -70,7 +97,7 @@ class CaptureWorker(QThread):
                 session=self.session
                 if view_session!=session:
                     locator.map_reference=None;view_session=session
-                action=self.map_action;self.map_action=None
+                actions=self.take_actions()
                 frame=None
                 try:
                     if sample:
@@ -104,6 +131,7 @@ class CaptureWorker(QThread):
                 self.result.emit(fix,frame,live)
                 if live and fix.valid:
                     locator.map_reference=None
+                    if actions:self.action_failed.emit('已返回小地图，未完成的大地图操作已取消')
                     # No big-map capture, matching, foreground or cursor queries.
                 elif live and self.settings.get('bigmap',{}).get('enabled'):
                     view=MapViewFix();big_frame=None
@@ -128,9 +156,12 @@ class CaptureWorker(QThread):
                     view.map_id,view.generation=context
                     view.session=session;view.captured_at=captured;view.region=region;view.foreground=foreground
                     self.mode='big' if view.valid else 'lost'
-                    # A hotkey is resolved against a NEW frame, never a cached transform.
-                    if action and (action[0]!=session or action[3]!=foreground or captured-action[4]>3):action=None
-                    self.map_result.emit(view,big_frame,action)
+                    # Retain quick consecutive presses and retry transient failures.
+                    pending=[a for a in actions if a[0]==session and a[3]==foreground and captured-a[4]<6]
+                    if len(pending)<len(actions):self.action_failed.emit('大地图操作超时或窗口已切换，请重试')
+                    if not view.valid:
+                        self.retry_actions(pending,foreground);pending=[]
+                    self.map_result.emit(view,big_frame,pending)
             self.wake.wait(.2 if self.mode=='big' else max(.2,self.settings['interval_ms']/1000))
             self.wake.clear()
         if grabber:

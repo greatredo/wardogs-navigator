@@ -206,6 +206,43 @@ def test_recovery_near_arrival_keeps_journey_and_return_leg(window,roundtrip):
     else:assert not window.navigator.active and window.hud.data['state']=='arrived'
 
 
+def test_hud_localization_recovers_without_starting_navigation(window):
+    window.worker.capture=True;frame=np.zeros((80,80,3),np.uint8)
+    window.on_fix(Fix(reason='temporary obstruction'),frame,True)
+    assert window.hud.data['state']=='lost'
+    window.on_fix(good_fix(window.worker),frame,True)
+    assert not window.navigator.active and window.hud.data['state']=='idle'
+    assert window.hud.localization_text==window.fix_label.text()=='实时定位 · 100%'
+
+
+def test_failed_replan_waits_and_resumes_same_return_trip(window,monkeypatch):
+    window.project.update(roads=[dict(id='line',name='line',kind='major',points=[[100,100],[600,100]])],
+                          start=[100,100],destination=[600,100],waypoints=[[250,100]],meters_per_pixel=1,roundtrip=True)
+    window.fix=Fix(x=500,y=100,valid=True);window.fix_live=True
+    assert window.plan_route(quiet=True,anchors=[[500,100],[250,100],[100,100]])
+    window.start_trip_navigation(1,'返程');saved=deepcopy(window.project)
+    original=window.plan_route;calls=[]
+    def recorded(*args,**kwargs):calls.append(kwargs.get('anchors'));return original(*args,**kwargs)
+    monkeypatch.setattr(window,'plan_route',recorded)
+    window.fix=Fix(x=500,y=200,valid=True);window.replan_navigation()
+    assert window.navigator.active and window.navigator.waiting_for_road and window.route
+    for t in range(20):
+        assert not window.navigator.update([500,200],time.monotonic()+t,100).get('replan')
+    assert len(calls)==1 and window.project==saved and window.navigator.lap==1
+    assert window.navigator.update([500,110],time.monotonic()+21,10)['replan']
+    window.fix=Fix(x=500,y=110,valid=True);window.replan_navigation()
+    assert not window.navigator.waiting_for_road and window.navigator.active
+    assert window.navigator.lap==1 and window.navigator.leg=='返程' and window.project==saved
+    assert calls[-1]==[[500,110],[250,100],[100,100]]
+    assert window.route.points[-1]==pytest.approx([100,100])
+
+
+def test_arrival_radius_control_saves_and_updates_running_trip(window):
+    from wardogs_nav.model import load_settings
+    window.arrival_radius.setValue(180)
+    assert window.settings['arrival_m']==180 and load_settings()['arrival_m']==180
+
+
 def test_real_worker_retries_capture_errors_and_stops_for_invalid_region(app,monkeypatch):
     source=FrameSource();source.error_at={2}
     worker=CaptureWorker(default_settings());worker.settings['interval_ms']=200

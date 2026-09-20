@@ -129,3 +129,48 @@ def test_offroute_waits_for_three_fixes():
     assert not nav.update([50,40],0).get('replan')
     assert not nav.update([50,40],1).get('replan')
     assert nav.update([50,40],2)['replan']
+
+
+def test_arrival_uses_actual_goal_before_road_progress_or_offroad_wait():
+    nav=Navigator();settings=default_settings();settings['arrival_m']=40
+    nav.start(route([[0,0],[0,200],[200,200],[200,0]]),[],settings,1,goal=[200,35])
+    nav.update([0,0],0,0)
+    nav.update([180,40],1,40)
+    assert nav.update([180,40],2,40)['state']=='arrived'
+    assert not nav.active
+    nav.start(route([[0,0],[200,0]]),[],settings,1,goal=[200,80])
+    for t in range(3):assert nav.update([200,0],t,0)['state']!='arrived'
+
+
+def test_offroad_wait_preserves_trip_then_replans_once_near_road():
+    nav=Navigator();settings=default_settings();settings['arrival_m']=5
+    nav.start(route([[0,0],[500,0]]),[],settings,1,True)
+    nav.lap=1;nav.leg='返程'
+    nav.update([10,0],0,0);progress=nav.progress
+    for t in range(1,12):
+        data=nav.update([100,70],t,70)
+        assert data['text']=='请返回道路' and not data['replan'] and data['speech'] is None
+    assert nav.active and nav.progress==progress and nav.lap==1 and nav.leg=='返程'
+    assert not nav.update([100,27],12,27)['replan']
+    assert nav.update([100,10],13,10)['replan']
+    nav.defer_replan([100,10],13)
+    for t in range(14,30):assert not nav.update([100,10],t,10)['replan']
+    assert nav.update([150,10],30,10)['replan']
+
+
+def test_overlapping_arrival_areas_do_not_flip_legs_while_parked():
+    nav=Navigator();settings=default_settings();settings['arrival_m']=60
+    nav.start(route([[0,0],[100,0]]),[],settings,1,True)
+    nav.update([50,0],0);assert nav.update([50,0],1)['state']=='turnaround'
+    for t in range(2,10):assert nav.update([50,0],t)['state']!='turnaround'
+    assert nav.lap==1
+    nav.update([0,0],10);assert nav.update([0,0],11)['state']=='turnaround'
+
+
+def test_road_distance_honors_enabled_roads_avoidance_and_private_route():
+    from wardogs_nav.routing import distance_to_roads
+    roads=[dict(kind='major',points=[[0,0],[100,0]]),dict(kind='offroad',points=[[0,50],[100,50]])]
+    assert distance_to_roads([50,50],roads,['major'])==50
+    assert distance_to_roads([50,50],roads,['major','offroad'])==0
+    assert distance_to_roads([50,50],roads,['major'],extra_route=route([[0,50],[100,50]]))==0
+    assert distance_to_roads([50,0],roads,['major'],[dict(point=[50,0],radius=10)])==float('inf')

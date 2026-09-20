@@ -140,14 +140,19 @@ class Navigator:
         self.cues = []
         self.offroute_count = 0
         self.arrival_count = 0
+        self.arrival_lock = None
+        self.waiting_for_road = False
+        self.replan_retry = None
 
-    def start(self, route, notes, settings, scale, roundtrip=False):
+    def start(self, route, notes, settings, scale, roundtrip=False, goal=None, return_goal=None):
         self.route = route
         self.notes = notes
         self.settings = settings
         self.scale = scale or 1.
         self.calibrated = scale is not None
         self.roundtrip = roundtrip
+        self.goal = list(goal if goal is not None else route.points[-1])
+        self.return_goal = list(return_goal if return_goal is not None else route.points[0])
         self.active = True
         self.progress = 0.
         self.last_time = None
@@ -159,6 +164,9 @@ class Navigator:
         self.leg = '去程'
         self.offroute_count = 0
         self.arrival_count = 0
+        self.arrival_lock = None
+        self.waiting_for_road = False
+        self.replan_retry = None
 
     def stop(self):
         self.active = False
@@ -170,7 +178,12 @@ class Navigator:
         self.last_point = None
         self.speed = 0.
 
-    def update(self, point, now):
+    def defer_replan(self,point,now):
+        self.waiting_for_road=True
+        self.replan_retry=(list(point),now)
+        self.lost()
+
+    def update(self, point, now, road_gap=None):
         if not self.active or not self.route:
             return None
         old_time, old_point = self.last_time, self.last_point
@@ -180,6 +193,35 @@ class Navigator:
             if v < 85:
                 self.speed = self.speed*.65 + v*.35
         self.last_time, self.last_point = now, point
+        # Arrival follows the selected destination, which may be off the road.
+        # It must not depend on reaching the last snapped route segment.
+        threshold = self.settings['arrival_m']
+        if self.arrival_lock is not None and distance(point,self.arrival_lock)*self.scale>threshold+max(5,threshold*.1):
+            self.arrival_lock=None
+        at_end=self.arrival_lock is None and distance(point,self.goal)*self.scale<=threshold
+        self.arrival_count=self.arrival_count+1 if at_end else 0
+        if self.arrival_count>=2:
+            self.arrival_count=0;self.waiting_for_road=False;self.replan_retry=None
+            if self.roundtrip:
+                self.arrival_lock=list(self.goal)
+                self.goal,self.return_goal=self.return_goal,self.goal
+                self.route=self.route.reversed()
+                self.lap+=1;self.leg='返程' if self.lap%2 else '去程'
+                self.cues=cues_for(self.route,self.notes,self.settings['mode'],self.scale)
+                self.progress=0.;self.spoken.clear();self.lost()
+                return {'state':'turnaround','text':f'已到达，开始{self.leg}','speech':f'已到达，请安全掉头，开始{self.leg}','remaining':self.route.length*self.scale}
+            self.active=False
+            return {'state':'arrived','text':'已到达目的地','speech':'已到达目的地','remaining':0}
+        tolerance=self.settings.get('road_tolerance_m',30)
+        if road_gap is not None and road_gap>tolerance:
+            self.waiting_for_road=True;self.replan_retry=None;self.offroute_count=0;self.lost()
+        if self.waiting_for_road:
+            rejoin=road_gap is None or road_gap<=tolerance*.75
+            retry=self.replan_retry
+            moved=retry is None or (now-retry[1]>=5 and distance(point,retry[0])*self.scale>=max(15,tolerance))
+            replan=rejoin and moved
+            if replan:self.replan_retry=(list(point),now)
+            return {'state':'waiting_road','text':'已返回道路，正在规划' if replan else '请返回道路','speech':None,'replan':replan}
         # Constrain progress around the last segment to avoid jumping to a later
         # leg at a crossing or an out-and-back overlap.
         upper = math.inf if old_time is None else self.progress + max(45/self.scale, (self.speed*(dt or 1)+60)/self.scale)
@@ -193,23 +235,6 @@ class Navigator:
         self.offroute_count = 0
         self.progress = max(self.progress, s)
         remaining = max(0., (self.route.length-self.progress)*self.scale)
-        threshold = self.settings['arrival_m']
-        at_end = remaining <= threshold and distance(point, self.route.points[-1])*self.scale <= threshold
-        self.arrival_count = self.arrival_count+1 if at_end else 0
-        if self.arrival_count >= 2:
-            self.arrival_count = 0
-            if self.roundtrip:
-                r = self.route
-                self.route = r.reversed()
-                self.lap += 1
-                self.leg = '返程' if self.lap%2 else '去程'
-                self.cues = cues_for(self.route, self.notes, self.settings['mode'], self.scale)
-                self.progress = 0.
-                self.spoken.clear()
-                self.last_time = None
-                return {'state':'turnaround','text':f'已到达，开始{self.leg}','speech':f'已到达，请安全掉头，开始{self.leg}','remaining':self.route.length*self.scale}
-            self.active = False
-            return {'state':'arrived','text':'已到达目的地','speech':'已到达目的地','remaining':0}
         candidates = [c for c in self.cues if c.at >= self.progress-6/self.scale]
         cue = candidates[0] if candidates else self.cues[-1]
         to_cue = max(0., (cue.at-self.progress)*self.scale)

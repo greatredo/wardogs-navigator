@@ -142,10 +142,10 @@ def test_mini_stops_mouse_and_hotkeys_before_any_cursor_read(window,monkeypatch)
     assert not window.big_overlay.isVisible() and window.worker.map_action is None
 
 
-@pytest.mark.parametrize('invalid',['stale','foreground','region','generation'])
+@pytest.mark.parametrize('invalid',['capture','foreground','region','generation'])
 def test_invalid_view_cannot_use_cursor_or_change_trip(window,monkeypatch,invalid):
     mini(window);view=large(window);before=deepcopy(window.project)
-    if invalid=='stale':view.captured_at-=3
+    if invalid=='capture':window.worker.capture=False
     elif invalid=='foreground':monkeypatch.setattr('wardogs_nav.hotkeys.foreground_window',lambda:999)
     elif invalid=='region':window.worker.reset_view()
     else:window.worker.request_map('bakurani')
@@ -160,7 +160,7 @@ def test_hotkey_waits_for_new_transform(window,monkeypatch):
     window.on_map_hotkey('navigate');action=window.worker.map_action
     assert window.project['destination'] is None and action
     view=large(window,matrix=np.array([[.5,0,100],[0,.5,0]]))
-    window.on_big_map(view,None,action)
+    window.on_big_map(view,None,[action])
     assert window.project['destination']==pytest.approx([300,100])
     assert window.project['start']==[100,100] and window.pending_start
     assert not window.navigator.active
@@ -168,20 +168,88 @@ def test_hotkey_waits_for_new_transform(window,monkeypatch):
     assert window.navigator.active and window.project['start']==[100,100]
 
 
-def test_stale_vehicle_defers_new_start_until_mini(window):
-    mini(window);window.last_accepted_time-=16;large(window)
+def test_last_vehicle_remains_origin_after_long_bigmap_session(window,monkeypatch):
+    mini(window);window.last_accepted_time-=3600;large(window)
+    vehicles=[];render=window.big_overlay.update_map
+    def recorded(*args):vehicles.append(args[5]);return render(*args)
+    monkeypatch.setattr(window.big_overlay,'update_map',recorded)
+    window.update_big_overlay();assert vehicles[-1]==[100,100]
     window.project['start']=[50,50];window.project['waypoints']=[[150,100]]
     window.apply_map_action('navigate',[300,100])
-    assert window.project['start'] is None and window.project['waypoints']==[] and window.pending_start
+    assert window.project['start']==[100,100] and window.project['waypoints']==[] and window.pending_start
     mini(window,200)
-    assert window.project['start']==[200,100] and window.navigator.active
+    assert window.project['start']==[100,100] and window.navigator.active
 
 
-def test_failed_bigmap_removes_overlay_and_reports_lost(window):
+def test_failed_bigmap_keeps_surface_hotkeys_and_recovers(window,monkeypatch):
     mini(window);large(window)
+    view=window.big_view;view.captured_at-=10
     large(window,valid=False,reason='地形被遮挡')
-    assert not window.big_overlay.isVisible() and not window.cursor_timer.isActive()
-    assert window.hud.data['state']=='lost' and '定位丢失' in window.fix_label.text()
+    assert window.big_overlay.isVisible() and window.cursor_timer.isActive() and window.global_hotkeys.active
+    assert window.big_view is view and window.hud.data['state']=='bigmap'
+    assert '识别中' in window.fix_label.text() and window.hud.localization_text==window.fix_label.text()
+    calls=[];monkeypatch.setattr('wardogs_nav.hotkeys.physical_cursor',lambda:calls.append(1) or (400,200))
+    window.poll_map_cursor();assert not calls  # No cursor polling against stale geometry.
+    window.on_map_hotkey('destination');assert window.worker.map_action and window.project['destination'] is None
+    action=window.worker.take_actions();view=large(window,confidence=.82)
+    window.on_big_map(view,None,action)
+    assert window.project['destination']==[200,100] and '82%' in window.hud.localization_text
+    mini(window);assert not window.big_overlay.isVisible() and not window.global_hotkeys.active
+
+
+def test_no_previous_vehicle_gets_start_on_first_mini_fix(window):
+    large(window);window.apply_map_action('navigate',[300,100])
+    assert window.project['start'] is None and window.pending_start
+    mini(window,100)
+    assert window.project['start']==[100,100] and window.navigator.active
+
+
+def test_worker_retries_multiple_hotkeys_until_a_valid_frame(app,monkeypatch):
+    settings=default_settings();settings['bigmap']['enabled']=True;settings['interval_ms']=200
+    worker=CaptureWorker(settings);valid=[False];frames=[];failures=[]
+    class Source:
+        def grab(self,region):return np.zeros((80,80,4),np.uint8)
+        def close(self):pass
+    class Matcher:
+        last=None
+        def locate(self,*args):return Fix()
+        def locate_map(self,*args):return MapViewFix(valid=valid[0],matrix=np.eye(2,3),frame_size=(80,80))
+    monkeypatch.setattr('mss.MSS',Source);monkeypatch.setattr('wardogs_nav.worker.Locator.from_assets',lambda *_:Matcher())
+    monkeypatch.setattr('wardogs_nav.worker.foreground_window',lambda:123)
+    worker.map_result.connect(lambda *args:frames.append(args));worker.action_failed.connect(failures.append)
+    worker.capture=True
+    worker.request_action('destination',(20,30),123);worker.request_action('waypoint',(40,50),123)
+    worker.start()
+    try:
+        until(app,lambda:len(frames)>=2)
+        assert all(not item[2] for item in frames) and worker.map_action and not failures
+        valid[0]=True;worker.wake.set();until(app,lambda:any(item[2] for item in frames))
+        actions=next(item[2] for item in frames if item[2])
+        assert [a[1:3] for a in actions]==[('destination',(20,30)),('waypoint',(40,50))]
+        worker.request_action('start',(60,70),123);worker.wake.set()
+        until(app,lambda:any(item[2] and item[2][0][1]=='start' for item in frames))
+        assert not failures
+    finally:worker.shutdown()
+
+
+def test_expired_hotkey_reports_failure_instead_of_silently_disappearing(window):
+    failures=[];window.worker.action_failed.connect(failures.append)
+    old=(window.worker.session,'destination',(400,200),123,time.monotonic()-7)
+    window.worker.retry_actions([old],123)
+    assert failures and window.worker.map_action is None
+    assert '已取消' in window.big_message
+
+
+def test_full_hotkey_queue_reports_rejection_and_remains_bounded(window):
+    for _ in range(8):assert window.worker.request_action('waypoint',(400,200),123)
+    pending=window.worker.take_actions()
+    for _ in range(8):assert window.worker.request_action('destination',(400,200),123)
+    assert not window.worker.request_action('start',(400,200),123)
+    assert '较多' in window.big_message
+    window.worker.retry_actions(pending,123)
+    actions=window.worker.take_actions()
+    assert len(actions)==8 and all(a[1]=='waypoint' for a in actions)
+    assert '取消' in window.big_message
 
 
 def test_blocked_new_trip_reports_failure_when_mini_returns(window):

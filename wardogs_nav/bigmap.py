@@ -13,7 +13,7 @@ class BigMapOverlay(QWidget):
     mask_changed=Signal(object)
 
     def __init__(self,settings):
-        super().__init__();self.settings=settings;self.surface=None;self.capture_excluded=None
+        super().__init__();self.settings=settings;self.surface=None;self.capture_excluded=None;self.region=None;self.opacity=None
         self.setWindowFlags(Qt.FramelessWindowHint|Qt.WindowStaysOnTopHint|Qt.Tool|Qt.WindowTransparentForInput|Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground);self.setAttribute(Qt.WA_ShowWithoutActivating)
 
@@ -58,7 +58,7 @@ class BigMapOverlay(QWidget):
         for i,point in enumerate(project['waypoints']):marker(point,f'途经 {i+1}','#80ecaa')
         marker(project.get('start'),'起始点 / 返程终点','#78caff',8)
         marker(project.get('destination'),'目的地','#ffce70',8)
-        marker(vehicle,'最近车辆位置','#dce7eb',5)
+        marker(vehicle,'上次车辆位置','#dce7eb',5)
         p.setPen(Qt.NoPen);p.setBrush(QColor(15,28,36,225));p.drawRoundedRect(8,8,max(200,min(w-16,p.fontMetrics().horizontalAdvance(message)+22)),30,5,5)
         p.setPen(QColor('#d9f4e9'));p.drawText(QPointF(18,29),message)
         p.end()
@@ -67,10 +67,15 @@ class BigMapOverlay(QWidget):
     def update_map(self,view,project,route=None,full_route=None,progress=0,vehicle=None,message='大地图 · 可使用快捷键'):
         if not view or not view.valid:self.hide();return
         self.surface=self.render_annotations(view,project,route,full_route,progress,vehicle,message)
-        self.setWindowOpacity(float(self.settings['opacity']));self.show()
+        opacity=float(self.settings['opacity'])
+        if self.opacity!=opacity:self.setWindowOpacity(opacity);self.opacity=opacity
+        showing=not self.isVisible()
+        if showing:self.show()
         if self.capture_excluded is None:self.capture_excluded=exclude_from_capture(self)
-        if native_windows():keep_on_top(self,view.region)
-        else:self.setGeometry(*[view.region[k] for k in ('left','top','width','height')])
+        if showing or self.region!=view.region:
+            if native_windows():keep_on_top(self,view.region)
+            else:self.setGeometry(*[view.region[k] for k in ('left','top','width','height')])
+            self.region=dict(view.region)
         mask=None
         if not self.capture_excluded:
             pixels=np.frombuffer(self.surface.constBits(),np.uint8).reshape(self.surface.height(),self.surface.bytesPerLine())

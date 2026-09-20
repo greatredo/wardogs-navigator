@@ -46,6 +46,7 @@ def default_settings():
             'anchor': [.5, .5], 'north_up': True, 'interval_ms': 700,
             'mode': 'normal', 'voice': True, 'voice_name': '', 'voice_rate': 0.,
             'lead_m': 100., 'lead_s': 4., 'arrival_m': 25., 'offroute_m': 80.,
+            'road_tolerance_m': 30.,
             'wrc_lead_m': 150., 'wrc_lead_s': 5., 'wrc_chain_m': 60.,
             'main_topmost': False,
             'bigmap': {'enabled': False, 'opacity': .9, 'line_width': 4, 'avoid_radius_m': 50},

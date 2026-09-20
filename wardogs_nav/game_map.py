@@ -13,6 +13,7 @@ from .routing import nearest_on_route
 class GameMapController:
     def init_game_map(self):
         self.big_view=None;self.game_window=0;self.big_resume=None
+        self.big_tracking=False
         self.big_message='大地图 · 快捷键就绪';self.big_message_until=0
         self.big_overlay=BigMapOverlay(self.settings['bigmap'])
         self.big_overlay.mask_changed.connect(lambda mask:setattr(self.worker,'map_mask',mask))
@@ -22,6 +23,7 @@ class GameMapController:
         self.global_hotkeys.status.connect(self.hotkey_status_changed)
         self.global_hotkeys.configure(self.settings['bigmap_hotkeys'])
         self.worker.map_result.connect(self.on_big_map)
+        self.worker.action_failed.connect(self.map_feedback)
 
     def build_game_map_settings(self,layout):
         group=self.group('局内大地图',layout)
@@ -45,7 +47,7 @@ class GameMapController:
             field.setMaximumSequenceLength(1);self.hotkey_fields[action]=field;form.addRow(label,field)
         group.addLayout(form);group.addWidget(self.button('保存快捷键',self.save_map_hotkeys))
         self.hotkey_status=self.text('识别到前台游戏大地图后启用；留空可禁用单项。支持 Ctrl / Alt 与字母、数字或 F1–F11。',True);group.addWidget(self.hotkey_status)
-        group.addWidget(self.text('一键新导航：最近 15 秒内的车辆位置作为新起始点，鼠标位置作为目的地，并清除旧途经点。位置过期时先保存目的地，回到小地图后自动补上起始点并导航。修改目的地会保留起始点。',True))
+        group.addWidget(self.text('一键新导航：最后一次小地图定位作为新起始点，鼠标位置作为目的地，并清除旧途经点。上次车辆位置保留至下一次定位或切换地图；尚未定位时，回到小地图后自动补上起始点。修改目的地会保留起始点。',True))
 
     def save_map_hotkeys(self):
         bindings={key:field.keySequence().toString(QKeySequence.PortableText) for key,field in self.hotkey_fields.items()}
@@ -76,39 +78,51 @@ class GameMapController:
         self.hide_game_map();self.game_window=0
 
     def hide_game_map(self):
-        self.big_view=None;self.cursor_timer.stop();self.global_hotkeys.set_active(False);self.big_overlay.hide()
+        self.big_view=None;self.big_tracking=False;self.cursor_timer.stop();self.global_hotkeys.set_active(False);self.big_overlay.hide()
 
-    def big_view_fresh(self):
+    def big_view_available(self):
         return (self.worker.capture and self.settings['bigmap']['enabled'] and self.big_view is not None
             and self.big_view.valid and self.big_view.session==self.worker.session
-            and self.big_view.region==self.settings['bigmap_capture']
-            and time.monotonic()-self.big_view.captured_at<2.5)
+            and (self.big_view.map_id,self.big_view.generation)==self.worker.context
+            and self.big_view.region==self.settings['bigmap_capture'])
+
+    def big_view_fresh(self):
+        return self.big_view_available() and self.big_tracking and time.monotonic()-self.big_view.captured_at<2.5
 
     def game_map_active(self):
-        return (self.big_view_fresh() and self.worker.mode=='big' and self.game_window
+        return (self.big_view_available() and self.worker.mode!='mini' and self.game_window
                 and hotkeys.foreground_window()==self.game_window)
 
-    def on_big_map(self,view,frame,action=None):
+    def big_localization(self):
+        if self.big_view_fresh():return f'大地图识别 · {self.big_view.confidence:.0%}'
+        return '大地图识别中 · 保留上次画面'
+
+    def on_big_map(self,view,frame,actions=None):
         if (not self.worker.capture or not self.settings['bigmap']['enabled'] or view.session!=self.worker.session
             or (view.map_id,view.generation)!=self.worker.context or view.region!=self.settings['bigmap_capture']):return
         self.big_status.setText(view.reason)
-        if not view.valid or time.monotonic()-view.captured_at>=2.5:
-            self.hide_game_map();self.invalidate_fix(view.reason);return
-        if self.worker.mode!='big':return
+        if self.worker.mode=='mini':return
         if not view.foreground or hotkeys.foreground_window()!=view.foreground:
             self.hide_game_map();return
         if self.game_window and view.foreground!=self.game_window:
             self.hide_game_map();return
+        if not view.valid or time.monotonic()-view.captured_at>=2.5:
+            self.big_tracking=False
+            if actions:self.worker.retry_actions(actions,view.foreground)
+            self.invalidate_fix(view.reason);self.update_big_overlay();return
         self.game_window=view.foreground;self.worker.target_window=view.foreground;self.big_view=view
+        self.big_tracking=True
         self.fix_live=False;self.minimap_overlay.hide();self.navigator.lost();self.tts.stop()
-        self.fix_label.setText('大地图操作中 · 行车播报暂停')
-        self.set_hud({'state':'idle','text':'大地图操作中'})
+        self.set_localization(self.big_localization())
+        self.set_hud({'state':'bigmap','text':'大地图操作中'})
         self.big_status.setText(f'{view.reason} · {view.inliers} 个匹配点')
         self.global_hotkeys.set_active(True)
-        if self.worker.mode=='big':self.cursor_timer.start()
+        self.cursor_timer.start()
         self.update_big_overlay()
-        if action:
-            if action[0]==view.session and action[3]==view.foreground and time.monotonic()-action[4]<3:
+        if actions:
+            for action in actions:
+                if action[0]!=view.session or action[3]!=view.foreground or time.monotonic()-action[4]>=6:
+                    self.map_feedback('操作超时或窗口已切换，请重试');continue
                 point=self.valid_map_point(view.screen_to_map(action[2]))
                 if point is not None:self.apply_map_action(action[1],point)
                 else:self.map_feedback('鼠标不在有效地图范围内')
@@ -121,6 +135,8 @@ class GameMapController:
     def poll_map_cursor(self):
         if not self.game_map_active():
             self.hide_game_map();return
+        if not self.big_view_fresh():
+            self.big_status.setText('等待大地图识别恢复；快捷键会核准新画面后执行');return
         point=hotkeys.physical_cursor()
         mapped=self.valid_map_point(self.big_view.screen_to_map(point)) if point else None
         if mapped:self.big_status.setText(f'大地图鼠标 {mapped[0]:.1f}, {mapped[1]:.1f} · 快捷键可用')
@@ -130,20 +146,21 @@ class GameMapController:
         # This guard precedes the ONLY cursor query in the hotkey path.
         if action not in hotkeys.ACTIONS or not self.game_map_active():return
         point=hotkeys.physical_cursor()
-        if point is None or self.big_view.screen_to_map(point) is None:return
-        self.worker.request_action(action,point,self.game_window)
-        self.map_feedback('正在核准鼠标位置…')
+        if point is None or self.big_view.screen_to_map(point) is None:
+            self.map_feedback('鼠标不在大地图框选范围内');return
+        if self.worker.request_action(action,point,self.game_window):self.map_feedback('正在核准鼠标位置…')
 
     def map_feedback(self,text):
         self.big_message=text;self.big_message_until=time.monotonic()+5
+        self.big_status.setText(text)
         self.update_big_overlay()
 
     def update_big_overlay(self):
-        if not self.big_view_fresh():return
-        text=self.big_message if time.monotonic()<self.big_message_until else '大地图 · 快捷键就绪 · 行车播报暂停'
+        if not self.big_view_available():return
+        text=self.big_message if time.monotonic()<self.big_message_until else ('大地图 · 快捷键就绪 · 行车播报暂停' if self.big_view_fresh() else '识别中 · 保留上次画面，等待刷新')
         self.big_overlay.update_map(self.big_view,self.project,self.route,self.full_route,
             self.navigator.progress if self.navigator.active else 0,
-            self.last_accepted if time.monotonic()-self.last_accepted_time<=15 else None,text)
+            self.last_accepted,text)
 
     def resume_context(self):
         if self.big_resume:return self.big_resume
@@ -161,7 +178,7 @@ class GameMapController:
         if action=='navigate':
             self.snapshot();self.detach_favorite();self.stop_navigation(quiet=True)
             self.navigator.lap=0;self.navigator.leg='去程'
-            self.project['start']=list(self.last_accepted) if self.last_accepted and time.monotonic()-self.last_accepted_time<=15 else None
+            self.project['start']=list(self.last_accepted) if self.last_accepted is not None else None
             self.project['destination']=point;self.project['waypoints']=[]
             self.changed();self.pending_start=True
             message='新路线已规划；关闭大地图后开始播报' if self.route else '目的地已设置；回到小地图后定位并规划'
@@ -196,6 +213,5 @@ class GameMapController:
         if start:
             self.big_resume=None
             if success:
-                self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip'])
-                self.navigator.lap=resume['lap'];self.navigator.leg=resume['leg']
+                self.start_trip_navigation(resume['lap'],resume['leg'])
             else:self.set_hud({'state':'offroute','text':'无可行路线'})

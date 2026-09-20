@@ -60,10 +60,23 @@ def run_selftest(output):
             and window.map.player_item is None and '100%' not in window.fix_label.text())
         window.on_fix(Fix(reason='合成单帧异常'),ambiguous,True)
         window.on_fix(fix,sample,True)
+        report['checks']['hud_localization_recovers_without_navigation']=(window.hud.data['state']!='lost'
+            and window.hud.localization_text==window.fix_label.text() and '实时定位' in window.hud.localization_text)
         report['checks']['failure_frame_retained_after_recovery']=(window.fix_live
             and np.array_equal(window.failure_diagnostic[0],ambiguous)
             and not window.failure_diagnostic[1]['fix']['valid'])
         window.worker.capture=False
+        window.arrival_radius.setValue(180)
+        report['checks']['arrival_radius_control']=window.settings['arrival_m']==180
+        window.arrival_radius.setValue(25)
+        from .routing import Route
+        short=Route([[0,0],[500,0]],['major'],['fixture'],500,[0,0],0)
+        check_nav=Navigator();check_nav.start(short,[],window.settings,1,True,goal=[500,60],return_goal=[0,0])
+        wait=check_nav.update([100,100],0,100)
+        report['checks']['offroad_wait_keeps_journey']=(wait['state']=='waiting_road' and not wait['replan'] and check_nav.active)
+        report['checks']['road_rejoin_replans']=check_nav.update([100,5],1,5)['replan']
+        check_nav.update([500,60],2,60)
+        report['checks']['arrival_uses_actual_offroad_goal']=check_nav.update([500,60],3,60)['state']=='turnaround'
         window.store_favorite(saved_route('打包验收路线',route));window.favorite_list.setCurrentRow(0);window.load_favorite()
         report['checks']['exact_favorite']=abs(window.route.length-route.length)<.1
         payload=library_payload(window.project,'routes');portable=output.with_name(output.stem+'-routes.json')
@@ -195,9 +208,9 @@ def run_selftest(output):
                 ident=next(iter(window.global_hotkeys.registered))
                 api=ctypes.WinDLL('user32',use_last_error=True).PostThreadMessageW
                 api.argtypes=[wintypes.DWORD,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM];api.restype=wintypes.BOOL
-                api(ctypes.windll.kernel32.GetCurrentThreadId(),0x0312,ident,0)
+                for _ in range(3):api(ctypes.windll.kernel32.GetCurrentThreadId(),0x0312,ident,0)
                 app.processEvents()
-                report['checks']['global_hotkey_native_dispatch']=bool(triggered)
+                report['checks']['global_hotkey_repeated_native_dispatch']=len(triggered)==3
             window.global_hotkeys.set_active(False)
             report['hotkey_status']=statuses
             window.grab().save(str(output.with_name(output.stem+'-cleared.png')))
