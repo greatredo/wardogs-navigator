@@ -187,7 +187,8 @@ def test_failed_bigmap_keeps_surface_hotkeys_and_recovers(window,monkeypatch):
     large(window,valid=False,reason='地形被遮挡')
     assert window.big_overlay.isVisible() and window.cursor_timer.isActive() and window.global_hotkeys.active
     assert window.big_view is view and window.hud.data['state']=='bigmap'
-    assert '识别中' in window.fix_label.text() and window.hud.localization_text==window.fix_label.text()
+    assert window.fix_label.text()=='大地图识别 · 0%' and window.hud.localization_text==window.fix_label.text()
+    assert '识别中' not in window.big_message
     calls=[];monkeypatch.setattr('wardogs_nav.hotkeys.physical_cursor',lambda:calls.append(1) or (400,200))
     window.poll_map_cursor();assert not calls  # No cursor polling against stale geometry.
     window.on_map_hotkey('destination');assert window.worker.map_action and window.project['destination'] is None
@@ -302,6 +303,11 @@ def test_nonroad_overlay_mask_covers_labels_and_does_not_draw_roads(window):
 def test_hotkey_parser_and_settings_roundtrip(tmp_path,monkeypatch):
     assert parse_hotkey('Ctrl+Alt+N')==(0x4003,ord('N'))
     assert parse_hotkey('Alt+F11')==(0x4001,0x7A)
+    assert parse_hotkey('Ctrl+Alt+[')==(0x4003,0xDB)
+    assert parse_hotkey('Ctrl+Alt+]')==(0x4003,0xDD)
+    assert parse_hotkey('*')==(0x4000,0x6A)
+    assert parse_hotkey('Ctrl+*')==(0x4002,0x6A)
+    assert parse_hotkey('Ctrl+Num+*')==(0x4002,0x6A)
     assert parse_hotkey('') is None
     for text in ('N','Shift+N','Ctrl+F12','Win+N','Ctrl+Ctrl+N','Ctrl+A, Ctrl+B'):
         with pytest.raises(ValueError):parse_hotkey(text)
@@ -309,3 +315,33 @@ def test_hotkey_parser_and_settings_roundtrip(tmp_path,monkeypatch):
     settings=default_settings();settings['bigmap']['enabled']=True;settings['bigmap_capture']['left']=-1600
     settings['bigmap_hotkeys']['navigate']='Alt+F8';atomic_json(tmp_path/'settings.json',settings)
     assert load_settings()==settings
+
+
+def test_symbol_shortcuts_save_and_conflicts_remain_visible(window):
+    from PySide6.QtGui import QKeySequence
+    for action,text in [('navigate','Ctrl+*'),('destination','Ctrl+Alt+]'),('start','Ctrl+Alt+[')]:
+        window.hotkey_fields[action].setKeySequence(QKeySequence(text))
+    window.save_map_hotkeys()
+    assert window.settings['bigmap_hotkeys']['navigate']=='Ctrl+*'
+    assert window.settings['bigmap_hotkeys']['destination']=='Ctrl+Alt+]'
+    window.hotkey_fields['start'].setKeySequence(QKeySequence('Ctrl+Shift+8'))
+    window.save_map_hotkeys()
+    assert '重复' in window.hotkey_status.text()
+    assert window.settings['bigmap_hotkeys']['start']=='Ctrl+Alt+['
+
+
+def test_bigmap_status_stays_stable_through_transient_failures(window):
+    mini(window);view=large(window,confidence=1)
+    original=window.fix_label.text();messages=[]
+    render=window.big_overlay.update_map
+    def capture(*args):messages.append(args[-1]);return render(*args)
+    window.big_overlay.update_map=capture
+    window.big_message_until=0
+    for _ in range(3):
+        large(window,valid=False,reason='大地图匹配不可靠')
+        view.captured_at-=4;window.check_stale()
+        assert window.fix_label.text()==original==window.hud.localization_text
+        assert window.hud.data['text']=='大地图操作中'
+    assert messages and len(set(messages))==1 and '识别中' not in messages[0]
+    large(window,confidence=.85)
+    assert window.hud.localization_text=='大地图识别 · 85%'

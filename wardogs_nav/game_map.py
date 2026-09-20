@@ -19,6 +19,7 @@ class GameMapController:
         self.big_overlay.mask_changed.connect(lambda mask:setattr(self.worker,'map_mask',mask))
         self.cursor_timer=QTimer(self);self.cursor_timer.setInterval(100);self.cursor_timer.timeout.connect(self.poll_map_cursor)
         self.global_hotkeys=hotkeys.GlobalHotkeys(self)
+        self.global_hotkeys.enabled_when=self.game_map_active
         self.global_hotkeys.triggered.connect(self.on_map_hotkey)
         self.global_hotkeys.status.connect(self.hotkey_status_changed)
         self.global_hotkeys.configure(self.settings['bigmap_hotkeys'])
@@ -46,7 +47,7 @@ class GameMapController:
             field=QKeySequenceEdit(QKeySequence(self.settings['bigmap_hotkeys'][action]))
             field.setMaximumSequenceLength(1);self.hotkey_fields[action]=field;form.addRow(label,field)
         group.addLayout(form);group.addWidget(self.button('保存快捷键',self.save_map_hotkeys))
-        self.hotkey_status=self.text('识别到前台游戏大地图后启用；留空可禁用单项。支持 Ctrl / Alt 与字母、数字或 F1–F11。',True);group.addWidget(self.hotkey_status)
+        self.hotkey_status=self.text('识别到前台游戏大地图后启用；留空可禁用单项。支持 Ctrl / Alt 与字母、数字、[、] 或 F1–F11；* 支持小键盘乘号或 Shift+8，可单独使用。',True);group.addWidget(self.hotkey_status)
         group.addWidget(self.text('一键新导航：最后一次小地图定位作为新起始点，鼠标位置作为目的地，并清除旧途经点。上次车辆位置保留至下一次定位或切换地图；尚未定位时，回到小地图后自动补上起始点。修改目的地会保留起始点。',True))
 
     def save_map_hotkeys(self):
@@ -54,10 +55,12 @@ class GameMapController:
         used=set()
         try:
             for action,text in bindings.items():
-                binding=hotkeys.parse_hotkey(text)
-                if binding and binding in used:raise ValueError(hotkeys.ACTIONS[action]+'：按键重复')
-                if binding:used.add(binding)
-        except ValueError as error:self.hotkey_status.setText(str(error));return
+                for binding in hotkeys.hotkey_bindings(text):
+                    if binding in used:raise ValueError('按键重复')
+                    used.add(binding)
+        except ValueError as error:
+            message=hotkeys.ACTIONS[action]+'：'+str(error)
+            self.hotkey_status.setText(message);self.notify('快捷键未保存：'+message);return
         self.settings['bigmap_hotkeys']=bindings;self.global_hotkeys.configure(bindings);self.save_settings()
         if not self.global_hotkeys.active:self.hotkey_status.setText('快捷键已保存；识别到前台大地图后启用')
 
@@ -94,8 +97,7 @@ class GameMapController:
                 and hotkeys.foreground_window()==self.game_window)
 
     def big_localization(self):
-        if self.big_view_fresh():return f'大地图识别 · {self.big_view.confidence:.0%}'
-        return '大地图识别中 · 保留上次画面'
+        return f'大地图识别 · {self.big_view.confidence:.0%}' if self.big_view_available() else '尚未识别大地图'
 
     def on_big_map(self,view,frame,actions=None):
         if (not self.worker.capture or not self.settings['bigmap']['enabled'] or view.session!=self.worker.session
@@ -144,7 +146,10 @@ class GameMapController:
 
     def on_map_hotkey(self,action):
         # This guard precedes the ONLY cursor query in the hotkey path.
-        if action not in hotkeys.ACTIONS or not self.game_map_active():return
+        if action not in hotkeys.ACTIONS:return
+        self.hotkey_status.setText('收到快捷键：'+hotkeys.ACTIONS[action])
+        if not self.game_map_active():
+            self.hotkey_status.setText('收到快捷键，但当前不是前台游戏大地图');return
         point=hotkeys.physical_cursor()
         if point is None or self.big_view.screen_to_map(point) is None:
             self.map_feedback('鼠标不在大地图框选范围内');return
@@ -153,11 +158,12 @@ class GameMapController:
     def map_feedback(self,text):
         self.big_message=text;self.big_message_until=time.monotonic()+5
         self.big_status.setText(text)
+        self.hotkey_status.setText(text)
         self.update_big_overlay()
 
     def update_big_overlay(self):
         if not self.big_view_available():return
-        text=self.big_message if time.monotonic()<self.big_message_until else ('大地图 · 快捷键就绪 · 行车播报暂停' if self.big_view_fresh() else '识别中 · 保留上次画面，等待刷新')
+        text=self.big_message if time.monotonic()<self.big_message_until else '大地图 · 快捷键就绪 · 行车播报暂停'
         self.big_overlay.update_map(self.big_view,self.project,self.route,self.full_route,
             self.navigator.progress if self.navigator.active else 0,
             self.last_accepted,text)

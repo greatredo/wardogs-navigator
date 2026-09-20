@@ -65,6 +65,9 @@ def run_selftest(output):
         report['checks']['failure_frame_retained_after_recovery']=(window.fix_live
             and np.array_equal(window.failure_diagnostic[0],ambiguous)
             and not window.failure_diagnostic[1]['fix']['valid'])
+        window.toggle_capture();window.toggle_capture();window.on_fix(fix,sample,True)
+        report['checks']['capture_restart_restores_hud_title']=(window.fix_live
+            and window.hud.data['text']=='等待导航' and window.hud.localization_text==window.fix_label.text())
         window.worker.capture=False
         window.arrival_radius.setValue(180)
         report['checks']['arrival_radius_control']=window.settings['arrival_m']==180
@@ -211,6 +214,12 @@ def run_selftest(output):
                 for _ in range(3):api(ctypes.windll.kernel32.GetCurrentThreadId(),0x0312,ident,0)
                 app.processEvents()
                 report['checks']['global_hotkey_repeated_native_dispatch']=len(triggered)==3
+            window.global_hotkeys.set_active(False)
+            symbol_keys=dict(DEFAULT_HOTKEYS,navigate='Ctrl+*',destination='Ctrl+Alt+]',start='Ctrl+Alt+[')
+            window.global_hotkeys.configure(symbol_keys);window.global_hotkeys.set_active(True)
+            report['checks']['symbol_hotkeys_registered']=len(window.global_hotkeys.registered)==8
+            from .hotkeys import pressed_keys
+            report['checks']['native_key_state_api']=isinstance(pressed_keys({0x11,0x12,ord('D'),0xDB,0xDD,0x6A}),set)
             window.global_hotkeys.set_active(False)
             report['hotkey_status']=statuses
             window.grab().save(str(output.with_name(output.stem+'-cleared.png')))

@@ -215,6 +215,18 @@ def test_hud_localization_recovers_without_starting_navigation(window):
     assert window.hud.localization_text==window.fix_label.text()=='实时定位 · 100%'
 
 
+def test_capture_restart_restores_hud_title_without_navigation(window):
+    frame=np.zeros((80,80,3),np.uint8)
+    window.worker.capture=True;window.toggle_capture()
+    assert window.hud.data['text']=='定位已关闭'
+    window.toggle_capture()
+    assert window.hud.data['state']=='locating'
+    window.on_fix(good_fix(window.worker),frame,True)
+    assert window.fix_live and not window.navigator.active
+    assert window.hud.data['text']=='等待导航'
+    assert window.hud.localization_text==window.fix_label.text()=='实时定位 · 100%'
+
+
 def test_failed_replan_waits_and_resumes_same_return_trip(window,monkeypatch):
     window.project.update(roads=[dict(id='line',name='line',kind='major',points=[[100,100],[600,100]])],
                           start=[100,100],destination=[600,100],waypoints=[[250,100]],meters_per_pixel=1,roundtrip=True)

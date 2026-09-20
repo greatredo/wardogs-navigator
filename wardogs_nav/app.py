@@ -889,10 +889,12 @@ class MainWindow(QMainWindow,GameMapController):
         self.worker.capture=not self.worker.capture
         if self.worker.capture:
             self.failure_diagnostic=None
+            self.set_localization('正在定位')
+            if not self.navigator.active:self.set_hud({'state':'locating','text':'等待定位'})
             self.worker.wake.set();self.capture_button.setText('关闭定位');self.notify('正在读取指定区域；请让游戏小地图保持可见')
         else:
             self.stop_navigation(quiet=True);self.invalidate_fix('定位已关闭')
-            self.set_localization('定位已关闭');self.set_hud({'state':'idle','text':'定位已关闭'})
+            self.set_localization('定位已关闭');self.set_hud({'state':'capture_off','text':'定位已关闭'})
 
     def start_navigation(self):
         if not self.project['destination']:self.notify('请先选择目的地');return
@@ -984,8 +986,8 @@ class MainWindow(QMainWindow,GameMapController):
         if fix.valid:
             if live:self.hide_game_map()
             self.set_localization(('实时定位' if live else '图片检验')+f' · {fix.confidence:.0%}')
-            if self.hud.data.get('state') in ('lost','bigmap'):
-                self.set_hud({'state':'idle','text':'定位已恢复' if live else '图片检验成功'})
+            if self.hud.data.get('state') in ('lost','bigmap','locating','capture_off'):
+                self.set_hud({'state':'idle','text':'等待导航' if live else '图片检验成功'})
             heading=f'{fix.heading:.0f}°' if fix.heading is not None else '未知'
             self.fix_detail.setText(f'位置 {fix.x:.1f}, {fix.y:.1f}  ·  匹配点 {fix.inliers}\n误差 {fix.error:.2f}px  ·  朝向 {heading}')
             if live:self.last_accepted=[fix.x,fix.y];self.last_accepted_time=now
@@ -1109,7 +1111,9 @@ class MainWindow(QMainWindow,GameMapController):
             target=Path(path)
             if has_frame:cv2.imencode('.png',frame)[1].tofile(str(target.with_suffix('.png')))
             metadata=dict(metadata,selected='latest_failure' if is_failure else 'latest_frame',
-                          saved_at=time.time(),current_fix=asdict(self.fix) if self.fix else None)
+                          saved_at=time.time(),current_fix=asdict(self.fix) if self.fix else None,
+                          last_hotkey=self.global_hotkeys.last_event,hotkey_status=self.hotkey_status.text(),
+                          last_map_action=self.big_message)
             atomic_json(target.with_suffix('.json'),metadata)
             self.notify('已保存最近失败帧 PNG 与诊断 JSON' if has_frame and is_failure else
                         '已保存小地图 PNG 与诊断 JSON' if has_frame else '未取得截图；已保存错误诊断 JSON')
