@@ -11,7 +11,7 @@ from PySide6.QtGui import QImage, QPixmap, QFont, QShortcut, QKeySequence
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QHBoxLayout,QVBoxLayout,QLabel,
     QPushButton,QTabWidget,QScrollArea,QFormLayout,QCheckBox,QComboBox,QLineEdit,QListWidget,
     QGroupBox,QFileDialog,QMessageBox,QInputDialog,QDialog,QSplitter,QFrame)
-from PySide6.QtTextToSpeech import QTextToSpeech
+from wardogs_audio.navigation import NavigationSpeech
 from .model import (asset_path,user_dir,atomic_json,default_settings,load_settings,read_project,
                     validate_project,upgrade_road_data,uid,KINDS,NOTE_TYPES,ROAD_PREFERENCES)
 from .vision import Fix
@@ -103,8 +103,11 @@ class MainWindow(QMainWindow,GameMapController):
         self.worker.result.connect(self.on_fix)
         self.worker.ready.connect(self.worker_ready)
         self.worker.failed.connect(self.worker_error)
-        self.tts=QTextToSpeech('sapi',self)
-        self.tts.errorOccurred.connect(lambda *_:self.voice_status.setText('系统语音不可用，请检查 Windows 语音包'))
+        self.tts=NavigationSpeech(self.settings,self)
+        self.tts.status.connect(lambda message:self.voice_status.setText(message))
+        self.tts.voices_ready.connect(self.voices_loaded)
+        self.tts.completed.connect(lambda receipt:self.speech_result(receipt,True))
+        self.tts.cancelled.connect(lambda receipt:self.speech_result(receipt,False))
         self.voices=[]
         self.hud=Hud(self.settings['hud'])
         self.minimap_overlay=MinimapOverlay(self.settings['minimap_overlay'])
@@ -328,6 +331,11 @@ class MainWindow(QMainWindow,GameMapController):
                 self.wrong_way_check=QCheckBox('持续反向行驶时提醒安全掉头');self.wrong_way_check.setChecked(self.settings['wrong_way_alert']);self.wrong_way_check.toggled.connect(lambda v:self.set_setting('wrong_way_alert',v));group.addWidget(self.wrong_way_check)
         speech=self.group('离线语音',layout)
         self.voice_check=QCheckBox('启用离线语音');self.voice_check.setChecked(self.settings['voice']);self.voice_check.toggled.connect(self.change_voice);speech.addWidget(self.voice_check)
+        self.voice_backend=QComboBox()
+        self.voice_backend.addItem('自动 · 系统语音失败时使用默认包','auto')
+        self.voice_backend.addItem('默认本地语音包 · 无需系统语音','local')
+        self.voice_backend.setCurrentIndex(1 if self.settings.get('voice_backend')=='local' else 0)
+        self.voice_backend.currentIndexChanged.connect(self.change_voice_backend);speech.addWidget(self.voice_backend)
         self.voice_combo=QComboBox();self.voice_combo.currentIndexChanged.connect(self.select_voice);speech.addWidget(self.voice_combo)
         self.voice_status=self.text('读取系统语音…',True);speech.addWidget(self.voice_status)
         sf=QFormLayout()
@@ -1019,7 +1027,9 @@ class MainWindow(QMainWindow,GameMapController):
             if data:
                 self.set_hud(data)
                 if data.get('state') in ('offroute','waiting_road') or (data.get('state')=='wrongway' and data.get('speech')):self.tts.stop()
-                if data.get('speech'):self.speak(data['speech'])
+                if data.get('speech'):
+                    receipt=(self.navigator,self.navigator.route,self.navigator.lap,data.get('speech_ids',set()))
+                    self.speak(data['speech'],receipt)
                 if data.get('state')=='turnaround':self.next_leg()
                 if data.get('replan'):self.replan_navigation()
                 if data.get('state')=='arrived':self.notify('已到达目的地')
@@ -1100,7 +1110,7 @@ class MainWindow(QMainWindow,GameMapController):
 
     def set_setting(self,key,value):
         self.settings[key]=value
-        if key=='voice_rate':self.tts.setRate(value)
+        if key=='voice_rate':self.tts.stop()
         if key=='wrong_way_alert':self.navigator.reset_direction()
         self.save_settings()
 
@@ -1163,27 +1173,51 @@ class MainWindow(QMainWindow,GameMapController):
         self.hud.apply_settings();self.hud.show();self.save_settings()
 
     def load_voices(self):
-        self.voices=self.tts.availableVoices();self.voice_combo.blockSignals(True);self.voice_combo.clear()
-        for voice in self.voices:self.voice_combo.addItem(voice.name()+' · '+voice.locale().name())
-        chosen=next((i for i,v in enumerate(self.voices) if v.name()==self.settings['voice_name']),None)
-        if chosen is None:chosen=next((i for i,v in enumerate(self.voices) if v.locale().language()==QLocale.Chinese),0)
+        self.voice_combo.setEnabled(self.settings.get('voice_backend','auto')!='local')
+        if self.settings['voice']:self.tts.load_voices()
+
+    def voices_loaded(self,voices):
+        self.voices=voices;self.voice_combo.blockSignals(True);self.voice_combo.clear()
+        for voice in self.voices:self.voice_combo.addItem(voice['name']+' · '+voice['language'])
+        chosen=next((i for i,v in enumerate(self.voices) if v['name']==self.settings['voice_name']),None)
+        if chosen is None:chosen=next((i for i,v in enumerate(self.voices) if v['language'].startswith('zh')),0)
         self.voice_combo.setCurrentIndex(chosen);self.voice_combo.blockSignals(False)
-        if self.voices:self.select_voice(chosen);self.voice_status.setText('本机系统语音 · 离线播报')
-        else:self.voice_status.setText('未发现系统语音；请安装 Windows 中文语音包后重启')
-        self.tts.setRate(self.settings['voice_rate'])
+        if self.settings.get('voice_backend')=='local':return
+        if any(v['language'].startswith('zh') for v in self.voices):self.voice_status.setText('系统语音就绪 · 失败时自动使用默认本地包')
+        elif self.voices:self.voice_status.setText('未发现中文系统声音 · 中文提示使用默认本地包')
+        else:self.voice_status.setText('系统声音不可用 · 内置提示可使用默认本地包')
 
     def select_voice(self,index):
-        if 0<=index<len(self.voices):self.tts.setVoice(self.voices[index]);self.settings['voice_name']=self.voices[index].name();self.save_settings()
+        if 0<=index<len(self.voices):
+            self.tts.stop();self.tts.service.retry_system()
+            self.tts.failed_texts.clear()
+            self.settings['voice_name']=self.voices[index]['name'];self.save_settings()
 
-    def change_voice(self,value):self.settings['voice']=value;self.tts.stop();self.save_settings()
+    def change_voice_backend(self):
+        self.tts.stop();self.tts.service.retry_system()
+        self.tts.failed_texts.clear()
+        self.settings['voice_backend']=self.voice_backend.currentData();self.save_settings();self.load_voices()
 
-    def speak(self,text):
-        if self.settings['voice'] and self.voices:self.tts.enqueue(text)
+    def change_voice(self,value):
+        self.settings['voice']=value;self.tts.stop();self.save_settings()
+        if value:self.load_voices()
+
+    def speech_result(self,receipt,completed):
+        if receipt is None:return
+        navigator,route,lap,ids=receipt
+        if navigator is self.navigator and navigator.route is route and navigator.lap==lap:
+            navigator.pending.difference_update(ids)
+            if completed:navigator.spoken.update(ids)
+
+    def speak(self,text,receipt=None):
+        if self.settings['voice']:return self.tts.enqueue(text,receipt)
+        # Muting intentionally consumes the current cue; it is not a cancelled playback.
+        self.speech_result(receipt,True)
+        return False
 
     def test_voice(self):
-        if not self.voices:self.load_voices()
-        if not self.voices:self.notify('系统语音不可用：请检查 Windows 设置 → 时间和语言 → 语音');return
-        self.tts.stop();self.tts.say('沿当前道路行驶八百米。前方一百米，路口直行。下个路口右转。' if self.settings['mode']=='normal' else '一百米，左三，收紧，接，右六。五十米，急刹车，接，左直角，别切。')
+        self.tts.failed_texts.clear();self.tts.service.retry_system()
+        self.tts.stop();self.tts.enqueue('沿当前道路行驶八百米。前方一百米，路口直行。下个路口右转。' if self.settings['mode']=='normal' else '一百米，左三，收紧，接，右六。五十米，急刹车，接，左直角，别切。')
 
     def test_image(self):
         path,_=QFileDialog.getOpenFileName(self,'用小地图图片检验定位','','地图截图 (*.png *.jpg *.jpeg *.bmp)')
@@ -1217,12 +1251,15 @@ class MainWindow(QMainWindow,GameMapController):
     def closeEvent(self,event):
         self.cursor_timer.stop();self.global_hotkeys.close();self.big_overlay.close()
         self.minimap_overlay.close()
-        self.watchdog.stop();self.autosave.stop();self.tts.stop();self.hud.close();self.worker.shutdown();self.save_project();self.save_settings();event.accept()
+        self.watchdog.stop();self.autosave.stop();self.tts.close();self.hud.close();self.worker.shutdown();self.save_project();self.save_settings();event.accept()
 
 
 def run():
     app=QApplication.instance() or QApplication([])
     app.setApplicationName('WardogsNavigator');app.setOrganizationName('WardogsNavigator')
     app.setStyle('Fusion');app.setStyleSheet(STYLE)
+    from .launcher import ModeDialog
+    selector=ModeDialog()
+    if selector.exec()!=QDialog.Accepted or selector.mode!='ground':return 0
     window=MainWindow();window.show()
     return app.exec()

@@ -7,7 +7,7 @@ from zipfile import ZipFile,ZIP_DEFLATED
 ROOT=Path(__file__).resolve().parents[1]
 TOP=['.gitignore','.gitattributes','LICENSE','NOTICE','README.md','CONTRIBUTING.md',
      'THIRD_PARTY_NOTICES.md','requirements.txt','build.ps1','main.py','启动导航.cmd']
-TOOLS=['copy_licenses.py','export_source.py','make_diagnostic_sample.py',
+TOOLS=['copy_licenses.py','export_source.py','build_frozen.py','make_default_voice_pack.py','make_diagnostic_sample.py',
        'fetch_clean_map.py','prepare_clean_map.py','extract_roads.py','build_map_features.py',
        'publish_map_assets.py','prepare_extra_maps.py','extract_extra_roads.py']
 ASSETS=['README.md','maps.json','map-source.json','default_project.json','legacy-road-seed.json',
@@ -19,7 +19,11 @@ for map_id in ('bakurani','zestafona'):
 def public_files():
     paths=[*(Path(p) for p in TOP),*(Path('tools')/p for p in TOOLS),*(Path('assets')/p for p in ASSETS)]
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_nav').glob('*.py'))
-    paths.extend(p.relative_to(ROOT) for p in (ROOT/'tests').glob('test_*.py'))
+    paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_audio').glob('*.py'))
+    paths.append(Path('wardogs_audio/windows_speech.ps1'))
+    paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_audio/assets').rglob('*') if p.is_file())
+    paths.extend(p.relative_to(ROOT) for p in (ROOT/'tests').glob('test_*.py')
+                 if not p.name.startswith('test_pilot'))
     # Community submissions are reviewed data and documentation, not executables.
     community=ROOT/'community'
     if community.is_dir():

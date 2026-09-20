@@ -135,6 +135,7 @@ class Navigator:
         self.last_time = None
         self.speed = 0.
         self.spoken = set()
+        self.pending = set()
         self.lap = 0
         self.leg = '去程'
         self.cues = []
@@ -160,6 +161,7 @@ class Navigator:
         self.last_point = None
         self.speed = 0.
         self.spoken.clear()
+        self.pending.clear()
         self.cues = cues_for(route, notes, settings['mode'], self.scale)
         self.lap = 0
         self.leg = '去程'
@@ -248,7 +250,7 @@ class Navigator:
                 self.route=self.route.reversed()
                 self.lap+=1;self.leg='返程' if self.lap%2 else '去程'
                 self.cues=cues_for(self.route,self.notes,self.settings['mode'],self.scale)
-                self.progress=0.;self.spoken.clear();self.lost()
+                self.progress=0.;self.spoken.clear();self.pending.clear();self.lost()
                 return {'state':'turnaround','text':f'已到达，开始{self.leg}','speech':f'已到达，请安全掉头，开始{self.leg}','remaining':self.route.length*self.scale}
             self.active=False
             return {'state':'arrived','text':'已到达目的地','speech':'已到达目的地','remaining':0}
@@ -305,13 +307,15 @@ class Navigator:
         to_cue = max(0., (cue.at-self.progress)*self.scale)
         mode=self.settings['mode']
         prefix='wrc_' if mode=='wrc' else ''
-        pending=[c for c in candidates if c.id not in self.spoken]
+        delivered=self.spoken | self.pending
+        pending=[c for c in candidates if c.id not in delivered]
         announcement=(pending[0] if pending else None) if mode=='wrc' else cue
         speech_distance=max(0.,(announcement.at-self.progress)*self.scale) if announcement else math.inf
         lead=((announcement.lead_m if announcement else 0) or self.settings.get(prefix+'lead_m',self.settings['lead_m']))+self.speed*self.settings.get(prefix+'lead_s',self.settings['lead_s'])
         speech = None
-        if announcement and announcement.id not in self.spoken and speech_distance <= lead:
-            self.spoken.add(announcement.id)
+        speech_ids=set()
+        if announcement and announcement.id not in delivered and speech_distance <= lead:
+            speech_ids.add(announcement.id)
             text=cue_text(announcement,mode,spoken=True)
             if mode=='normal':
                 speech=f'前方{distance_text(speech_distance,self.calibrated)}，{text}' if speech_distance>=15 else text
@@ -321,16 +325,17 @@ class Navigator:
                 for following in pending[1:3]:
                     gap=(following.at-previous.at)*self.scale
                     if following.kind=='arrival' or gap>self.settings.get('wrc_chain_m',60):break
-                    if following.id not in self.spoken:
+                    if following.id not in delivered:
                         speech+=('，接，' if gap<25 else '，'+distance_text(gap,self.calibrated)+'，')+cue_text(following,mode,spoken=True)
-                        self.spoken.add(following.id)
+                        speech_ids.add(following.id)
                     previous=following
-        elif mode=='normal' and to_cue>lead and 'along-'+cue.id not in self.spoken:
-            self.spoken.add('along-'+cue.id)
+        elif mode=='normal' and to_cue>lead and 'along-'+cue.id not in delivered:
+            speech_ids.add('along-'+cue.id)
             speech='沿当前道路行驶'+distance_text(to_cue,self.calibrated)
+        self.pending.update(speech_ids)
         text=cue_text(cue,mode)
         if mode=='normal' and to_cue>lead:text='沿当前道路行驶'
         return {'state':'navigating','cue':cue,'text':text,'next_text':cue_text(cue,mode),
-                'distance':to_cue,'remaining':remaining,'speech':speech,'speed':self.speed,
+                'distance':to_cue,'remaining':remaining,'speech':speech,'speech_ids':speech_ids,'speed':self.speed,
                 'inferred':cue.inferred,'leg':self.leg,'lap':self.lap,
                 'upcoming':[{'cue':c,'distance':max(0,(c.at-self.progress)*self.scale)} for c in candidates[:3]]}

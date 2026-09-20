@@ -16,3 +16,5 @@ Binary distributions dynamically package the following components, with their li
 - PyInstaller 6.22.3: GPL with bootloader distribution exception.
 
 The source distribution also uses pytest 9.1.1 (MIT) for development; pytest is not part of the application runtime. Complete application source and build scripts are provided in the source distribution. Windows speech and fonts are supplied by the operating system, not redistributed in this package. The web calculator at https://bili.bi/WARDOGS/zh/ links to the public upstream map-data project above; its client code is not bundled.
+
+The application includes a default PCM voice pack generated offline with Kokoro-82M v1.0 (Apache-2.0 model) using the stock zf_xiaoxiao and af_heart voices and original application prompts. No model weights or inference dependencies are distributed. See [voice pack sources](wardogs_audio/assets/default/SOURCES.md), also present under `_internal/wardogs_audio/assets/default` in binary builds. File playback uses Qt Multimedia.
