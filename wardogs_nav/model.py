@@ -41,12 +41,17 @@ def atomic_json(path, data):
 
 
 def default_settings():
+    from .hotkeys import DEFAULT_HOTKEYS
     return {'map_id':'ozeti','capture': {'left': 0, 'top': 0, 'width': 340, 'height': 303},
             'anchor': [.5, .5], 'north_up': True, 'interval_ms': 700,
             'mode': 'normal', 'voice': True, 'voice_name': '', 'voice_rate': 0.,
             'lead_m': 100., 'lead_s': 4., 'arrival_m': 25., 'offroute_m': 80.,
+            'road_tolerance_m': 30.,
             'wrc_lead_m': 150., 'wrc_lead_s': 5., 'wrc_chain_m': 60.,
             'main_topmost': False,
+            'bigmap': {'enabled': False, 'opacity': .9, 'line_width': 4, 'avoid_radius_m': 50},
+            'bigmap_capture': {'left': 0, 'top': 0, 'width': 800, 'height': 800},
+            'bigmap_hotkeys': dict(DEFAULT_HOTKEYS),
             'minimap_overlay': {'enabled': True, 'opacity': .85, 'line_width': 4},
             'hud': {'x': 700, 'y': 60, 'width': 400, 'height': 170, 'opacity': .94, 'locked': False}}
 

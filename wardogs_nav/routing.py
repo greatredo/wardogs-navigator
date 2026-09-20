@@ -65,6 +65,18 @@ def usable(road, allowed, confirmed_only):
     return road['kind'] in allowed
 
 
+def distance_to_roads(point, roads, allowed, avoid=(), extra_route=None):
+    """Distance to a usable road, including a followed private route."""
+    paths=[road['points'] for road in roads if usable(road,allowed,False)]
+    if extra_route:paths.append(extra_route.points)
+    best=math.inf
+    for points in paths:
+        for a,b in zip(points,points[1:]):
+            gap,q,_=project(point,a,b)
+            if gap<best and not any(blocked(q,q,z) for z in avoid):best=gap
+    return best
+
+
 def build_graph(roads, anchors, allowed, confirmed_only=False, avoid=(), max_snap=45.):
     if len(anchors) < 2:
         raise RouteError('请先设置目的地并完成定位')

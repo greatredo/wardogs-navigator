@@ -48,6 +48,7 @@ class Hud(QWidget):
         super().__init__()
         self.settings=settings
         self.data={'text':'等待定位','state':'idle'}
+        self.localization_text='尚未定位'
         self.mode='normal'
         self.drag=None
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -71,6 +72,9 @@ class Hud(QWidget):
         self.mode=mode
         self.calibrated=calibrated
         self.update()
+
+    def set_localization(self,text):
+        self.localization_text=text;self.update()
 
     def showEvent(self,event):
         super().showEvent(event)
@@ -113,16 +117,18 @@ class Hud(QWidget):
             text=('左' if kind=='left' else '右')+f' {cue.grade}'
         p.setFont(QFont('Microsoft YaHei UI',23 if len(text)<10 else 13,QFont.Bold))
         p.setPen(QColor('#f0f4f3'))
-        p.drawText(QRectF(110,44,w-125,55),Qt.AlignLeft|Qt.AlignVCenter,text)
+        p.drawText(QRectF(110,40,w-125,47),Qt.AlignLeft|Qt.AlignVCenter,text)
         p.setFont(QFont('Microsoft YaHei UI',11))
         p.setPen(QColor(color))
         d=self.data.get('distance')
         unit='米' if getattr(self,'calibrated',True) else '单位'
-        sub=f'{d:.0f} {unit}' if d is not None else '自动定位 · 本地导航'
+        sub=f'{d:.0f} {unit}' if d is not None else ''
         remaining=self.data.get('remaining')
         if remaining is not None:
             sub+=f'   /   剩余 {remaining/1000:.2f} km' if unit=='米' else f'  /  剩余 {remaining:.0f}'
-        p.drawText(QRectF(110,103,w-125,30),Qt.AlignLeft,sub)
+        p.drawText(QRectF(110,87,w-125,24),Qt.AlignLeft,sub)
+        p.setFont(QFont('Microsoft YaHei UI',9));p.setPen(QColor('#a3b4b7'))
+        p.drawText(QRectF(110,115,w-125,24),Qt.AlignLeft,self.localization_text)
         p.setFont(QFont('Microsoft YaHei UI',8));p.setPen(QColor('#9da8ab'))
         footer=self.data.get('next_text','按规划道路行驶') if self.mode=='normal' else '路书 · 1 慢弯 — 6 快弯'
         if not self.settings.get('locked'):
@@ -132,6 +138,8 @@ class Hud(QWidget):
     def paint_roadbook(self,p,w):
         p.setFont(QFont('Microsoft YaHei UI',9));p.setPen(QColor('#e8c570'))
         p.drawText(QRectF(16,8,w-32,22),Qt.AlignLeft,'WRC  /  路书    '+self.data.get('leg',''))
+        p.setFont(QFont('Microsoft YaHei UI',8));p.setPen(QColor('#a3b4b7'))
+        p.drawText(QRectF(145,8,w-161,22),Qt.AlignRight,self.localization_text)
         cards=self.data['upcoming'][:3];width=(w-32-8*(len(cards)-1))/len(cards)
         unit='m' if getattr(self,'calibrated',True) else '单位'
         for i,item in enumerate(cards):

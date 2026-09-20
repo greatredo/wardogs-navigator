@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import math
+import time
 import cv2
 import numpy as np
 
@@ -27,6 +28,36 @@ class Fix:
     reason: str = "未定位"
     map_id: str | None = None
     generation: int = 0
+    session: int | None = None
+
+
+@dataclass
+class MapViewFix:
+    """Physical crop pixels -> map pixels. This is never a vehicle position."""
+    matrix: object = None
+    frame_size: tuple = (0, 0)
+    confidence: float = 0
+    inliers: int = 0
+    error: float = 0
+    valid: bool = False
+    reason: str = '未识别大地图'
+    map_id: str | None = None
+    generation: int = 0
+    session: int = 0
+    captured_at: float = 0
+    region: object = None
+    foreground: int = 0
+
+    def screen_to_map(self, point):
+        if not self.valid or self.matrix is None or not self.region:return None
+        x,y=point[0]-self.region['left'],point[1]-self.region['top']
+        if not (0<=x<self.frame_size[0] and 0<=y<self.frame_size[1]):return None
+        return (np.asarray(self.matrix) @ [x,y,1]).tolist()
+
+    def project(self, points):
+        if not self.valid or self.matrix is None or not len(points):return []
+        inverse=cv2.invertAffineTransform(np.asarray(self.matrix,dtype=float))
+        return (np.asarray(points) @ inverse[:,:2].T+inverse[:,2]).tolist()
 
 
 def feature_mask(image, minimap=True, path_mask=None):
@@ -39,13 +70,17 @@ def feature_mask(image, minimap=True, path_mask=None):
     overlay = ((hsv[:, :, 1] > 80) | (hsv[:, :, 2] > 215)).astype(np.uint8)
     overlay = cv2.dilate(overlay, np.ones((7, 7), np.uint8))
     mask[overlay > 0] = 0
-    if path_mask:
+    if path_mask is not None:
         # Mask our last rendered screen-space route as well as its colour. This
         # remains reliable when users choose a nearly transparent path.
-        paths=path_mask['paths'] if isinstance(path_mask,dict) else [path_mask[0]]
-        width=path_mask['width'] if isinstance(path_mask,dict) else path_mask[1]
-        paths=[np.int32(points) for points in paths if len(points)>=2]
-        if paths:cv2.polylines(mask,paths,False,0,max(3,round(width)+10))
+        if isinstance(path_mask,np.ndarray):
+            if path_mask.shape==mask.shape:
+                mask[cv2.dilate(path_mask,np.ones((7,7),np.uint8))>0]=0
+        else:
+            paths=path_mask['paths'] if isinstance(path_mask,dict) else [path_mask[0]]
+            width=path_mask['width'] if isinstance(path_mask,dict) else path_mask[1]
+            paths=[np.int32(points) for points in paths if len(points)>=2]
+            if paths:cv2.polylines(mask,paths,False,0,max(3,round(width)+10))
     return mask
 
 
@@ -99,6 +134,7 @@ class Locator:
         self.matcher.add([self.descriptors])
         self.matcher.train()
         self.last=None
+        self.map_reference=None
 
     @classmethod
     def from_assets(cls,map_id='ozeti'):
@@ -125,6 +161,60 @@ class Locator:
         fix=self._match(image,points,desc,self.matcher,self.points,anchor,north_up)
         self.last=fix if fix.valid else None
         return fix
+
+    def locate_map(self, image, path_mask=None):
+        if image is None or min(image.shape[:2])<60:
+            return MapViewFix(reason='大地图区域太小')
+        h,w=image.shape[:2]
+        ratio=min(1.,1100/max(h,w))
+        mask=feature_mask(image,minimap=False,path_mask=path_mask)
+        gray=cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+        if ratio<1:
+            gray=cv2.resize(gray,None,fx=ratio,fy=ratio,interpolation=cv2.INTER_AREA)
+            mask=cv2.resize(mask,(gray.shape[1],gray.shape[0]),interpolation=cv2.INTER_NEAREST)
+        keypoints,desc=self.sift.detectAndCompute(gray,mask)
+        if desc is None or len(desc)<10:return MapViewFix(reason='大地图缺少可匹配地形')
+        pairs=self.matcher.knnMatch(desc,k=2)
+        result=self._map_match(pairs,keypoints,ratio,self.points,(w,h))
+        drift=0.
+        previous=self.map_reference
+        if not result.valid and previous and time.monotonic()-previous['time']<4:
+            matcher=cv2.FlannBasedMatcher(dict(algorithm=1,trees=3),dict(checks=64))
+            matcher.add([previous['descriptors']]);matcher.train()
+            pairs=matcher.knnMatch(desc,k=2)
+            result=self._map_match(pairs,keypoints,ratio,previous['points'],(w,h),
+                                   threshold=min(2.5,previous['scale']*5),tracking=True)
+            drift=previous['drift']+result.error
+            if drift>1.5:
+                result.valid=False;result.reason='请缩小大地图以重新核准地形'
+        if result.valid:
+            pixels=np.float32([p.pt for p in keypoints])/ratio
+            self.map_reference=dict(points=pixels@result.matrix[:,:2].T+result.matrix[:,2],
+                descriptors=desc,time=time.monotonic(),drift=drift,scale=float(np.linalg.norm(result.matrix[:,0])))
+        return result
+
+    def _map_match(self,pairs,keypoints,ratio,reference,frame_size,threshold=2.5,tracking=False):
+        good=[m for pair in pairs if len(pair)==2 for m,n in [pair] if m.distance<.76*n.distance]
+        # Repeated grid symbols must not count as many independent landmarks.
+        good=list({m.trainIdx:m for m in sorted(good,key=lambda m:m.distance,reverse=True)}.values())
+        if len(good)<10:return MapViewFix(reason=f'大地图匹配不足（{len(good)}）')
+        src=np.float32([keypoints[m.queryIdx].pt for m in good])/ratio
+        dst=np.float32([reference[m.trainIdx] for m in good])
+        mat,mask=cv2.estimateAffinePartial2D(src,dst,method=cv2.RANSAC,ransacReprojThreshold=threshold,maxIters=5000,confidence=.995)
+        if mat is None:return MapViewFix(reason='无法建立大地图对应关系')
+        accepted=mask.ravel().astype(bool);count=int(accepted.sum())
+        scale=float(np.linalg.norm(mat[:,0]))
+        rotation=math.degrees(math.atan2(mat[1,0],mat[0,0]))
+        error=float(np.median(np.linalg.norm(src[accepted]@mat[:,:2].T+mat[:,2]-dst[accepted],axis=1)))
+        w,h=frame_size
+        spread=float(cv2.contourArea(cv2.convexHull(src[accepted])))/(w*h) if count>=3 else 0
+        confidence=min(1.,count/24)*min(1.,count/len(good)/.5)*min(1.,spread/.12)
+        center=mat@[w/2,h/2,1]
+        valid=(count>=(16 if tracking else 10) and confidence>=.4 and error<min(2,3*scale)
+               and .025<scale<8 and abs(rotation)<6
+               and 0<=center[0]<self.map_shape[1] and 0<=center[1]<self.map_shape[0])
+        return MapViewFix(mat,(w,h),confidence,count,error,bool(valid),
+                          ('大地图缩放跟踪' if tracking else '大地图已识别') if valid else '大地图匹配不可靠')
 
     def _match(self,image,points,desc,matcher,reference,anchor,north_up):
         pairs = matcher.knnMatch(desc, k=2)

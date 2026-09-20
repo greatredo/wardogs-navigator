@@ -16,7 +16,7 @@ from .model import (asset_path,user_dir,atomic_json,default_settings,load_settin
                     validate_project,upgrade_road_data,uid,KINDS,NOTE_TYPES)
 from .vision import Fix
 from . import __version__
-from .routing import plan,RouteError,distance,bearing,nearest_on_route
+from .routing import plan,RouteError,distance,bearing,nearest_on_route,distance_to_roads
 from .navigation import Navigator, cues_for, cue_text, distance_text
 from .library import saved_route,supplement_roads,follow_saved,library_payload,merge_library,snap_saved,check_library_target
 from .maps import all_maps,map_info,map_asset,project_path,load_map_project
@@ -25,6 +25,7 @@ from .hud import Hud
 from .dialogs import RoadDialog,NoteDialog,RegionDialog,FavoriteImportDialog,number
 from .worker import CaptureWorker
 from .overlay import MinimapOverlay,keep_on_top
+from .game_map import GameMapController
 
 STYLE='''
 QWidget { background:#151d25; color:#e5ecee; font:10pt "Microsoft YaHei UI"; }
@@ -62,7 +63,7 @@ QStatusBar { background:#11191f; color:#9bb1bd; }
 '''
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow,GameMapController):
     def __init__(self, start_worker=True):
         super().__init__()
         screen=QApplication.primaryScreen().availableGeometry()
@@ -108,6 +109,7 @@ class MainWindow(QMainWindow):
         self.hud=Hud(self.settings['hud'])
         self.minimap_overlay=MinimapOverlay(self.settings['minimap_overlay'])
         self.minimap_overlay.mask_changed.connect(lambda mask:setattr(self.worker,'path_mask',mask))
+        self.init_game_map()
         self.hud.changed.connect(self.save_settings)
         self.build_ui()
         self.setWindowTitle('WARDOGS Navigator '+__version__+' · '+map_info(self.project['map'])['name'])
@@ -227,6 +229,9 @@ class MainWindow(QMainWindow):
         target.addWidget(self.row(self.button('添加途经点',lambda:self.set_tool('waypoint')),self.button('删除选中',self.delete_waypoint),self.button('框选危险区',lambda:self.set_tool('avoid'))))
         target.addWidget(self.text('拖框标记危险区域即可绕行；绿点用于指定必经位置。右键可删除标注。',True))
         self.roundtrip=QCheckBox('连续往返（到达后自动切换去程 / 返程）');self.roundtrip.setChecked(self.project['roundtrip']);self.roundtrip.toggled.connect(self.change_policy);target.addWidget(self.roundtrip)
+        arrival=QFormLayout();self.arrival_radius=number(self.settings['arrival_m'],5,1000)
+        self.arrival_radius.valueChanged.connect(lambda v:self.set_setting('arrival_m',v));arrival.addRow('到达范围 (m)',self.arrival_radius);target.addLayout(arrival)
+        target.addWidget(self.text('进入目标点范围并连续定位确认后即算到达，去程与返程都生效。未标定比例时按地图单位计算。',True))
         rules=self.group('路线规则',layout);self.kind_checks={}
         for key,label in KINDS.items():
             check=QCheckBox('允许'+label);check.setChecked(key in self.project['policy']['allowed']);check.toggled.connect(self.change_policy);self.kind_checks[key]=check;rules.addWidget(check)
@@ -303,12 +308,13 @@ class MainWindow(QMainWindow):
             w=number(self.settings['minimap_overlay'][key],lo,hi,dec);w.valueChanged.connect(lambda v,k=key:self.overlay_setting(k,v));of.addRow(label,w)
         overlay.addLayout(of)
         self.overlay_status=self.text('实时导航时显示；自动跟随截图区域、缩放及旋转。路径窗口不接收鼠标输入。',True);overlay.addWidget(self.overlay_status)
+        self.build_game_map_settings(layout)
         speech=self.group('语音与提前量',layout)
         self.voice_check=QCheckBox('启用离线语音');self.voice_check.setChecked(self.settings['voice']);self.voice_check.toggled.connect(self.change_voice);speech.addWidget(self.voice_check)
         self.voice_combo=QComboBox();self.voice_combo.currentIndexChanged.connect(self.select_voice);speech.addWidget(self.voice_combo)
         self.voice_status=self.text('读取系统语音…',True);speech.addWidget(self.voice_status)
         sf=QFormLayout()
-        for key,label,lo,hi,decimals in [('lead_m','常规提前距离 (m)',0,1500,0),('lead_s','常规车速提前 (s)',0,20,1),('wrc_lead_m','WRC 提前距离 (m)',0,1500,0),('wrc_lead_s','WRC 车速提前 (s)',0,20,1),('wrc_chain_m','WRC 连读间隔 (m)',0,300,0),('arrival_m','到达半径 (m)',5,100,0),('offroute_m','偏航重算阈值 (m)',20,500,0),('voice_rate','语速 (-1 慢 / 1 快)',-1,1,1)]:
+        for key,label,lo,hi,decimals in [('lead_m','常规提前距离 (m)',0,1500,0),('lead_s','常规车速提前 (s)',0,20,1),('wrc_lead_m','WRC 提前距离 (m)',0,1500,0),('wrc_lead_s','WRC 车速提前 (s)',0,20,1),('wrc_chain_m','WRC 连读间隔 (m)',0,300,0),('road_tolerance_m','道路附近范围 (m)',5,200,0),('offroute_m','偏航重算阈值 (m)',20,500,0),('voice_rate','语速 (-1 慢 / 1 快)',-1,1,1)]:
             w=number(self.settings[key],lo,hi,decimals);w.valueChanged.connect(lambda value,k=key:self.set_setting(k,value));sf.addRow(label,w)
         speech.addLayout(sf);speech.addWidget(self.button('试听当前模式',self.test_voice))
         hud=self.group('导航图标',layout);hf=QFormLayout();self.hud_fields={}
@@ -343,6 +349,7 @@ class MainWindow(QMainWindow):
         self.autosave.stop()
         if not self.save_project():return False
         self.stop_navigation(quiet=True);self.worker.capture=False;self.capture_button.setText('开启定位')
+        self.reset_game_map()
         self.worker.request_map(map_id)
         self.settings['map_id']=map_id;self.project=target;self.history=[]
         self.route=None;self.full_route=None;self.favorite_trip=None;self.frame=None
@@ -354,7 +361,7 @@ class MainWindow(QMainWindow):
         self.map_combo.blockSignals(True);self.map_combo.setCurrentIndex(self.map_combo.findData(map_id));self.map_combo.blockSignals(False)
         self.sync_policy();self.refresh_lists();self.refresh_map();self.update_scale_label()
         self.preview.clear();self.preview.setText('开启定位后显示当前地图的小地图预览')
-        self.fix_label.setText('尚未定位');self.fix_detail.setText('已切换地图，正在准备对应的定位特征。')
+        self.set_localization('尚未定位');self.fix_detail.setText('已切换地图，正在准备对应的定位特征。')
         self.route_label.setText('路线尚未规划');self.coordinate_label.setText('地图坐标 —')
         name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator '+__version__+' · '+name)
         self.save_settings();self.notify(f'已切换到 {name}；道路、收藏和路书已载入。开启定位后重新开始导航。')
@@ -394,8 +401,7 @@ class MainWindow(QMainWindow):
         if replan and self.project['destination'] and (self.project['start'] or (self.fix and self.fix.valid) or self.active_favorite()):
             success=self.plan_route(quiet=True,anchors=anchors)
             if resume and success:
-                self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip'])
-                self.navigator.leg,self.navigator.lap=leg,lap
+                self.start_trip_navigation(lap,leg)
                 self.update_minimap_overlay()
                 self.speak('路线已更新')
 
@@ -441,6 +447,7 @@ class MainWindow(QMainWindow):
     def refresh_map(self):
         self.update_favorite_preview()
         self.map.project=self.project;self.map.route=self.route;self.map.full_route=self.full_route;self.map.fix=self.fix;self.map.redraw()
+        self.update_big_overlay()
 
     def favorite_drawing_option(self,*_):
         self.update_drawing_controls()
@@ -878,13 +885,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.button('关闭',dialog.accept));dialog.exec()
 
     def toggle_capture(self):
+        self.reset_game_map();self.worker.reset_view()
         self.worker.capture=not self.worker.capture
         if self.worker.capture:
             self.failure_diagnostic=None
+            self.set_localization('正在定位')
+            if not self.navigator.active:self.set_hud({'state':'locating','text':'等待定位'})
             self.worker.wake.set();self.capture_button.setText('关闭定位');self.notify('正在读取指定区域；请让游戏小地图保持可见')
         else:
             self.stop_navigation(quiet=True);self.invalidate_fix('定位已关闭')
-            self.fix_label.setText('定位已关闭');self.set_hud({'state':'idle','text':'定位已关闭'})
+            self.set_localization('定位已关闭');self.set_hud({'state':'capture_off','text':'定位已关闭'})
 
     def start_navigation(self):
         if not self.project['destination']:self.notify('请先选择目的地');return
@@ -901,18 +911,32 @@ class MainWindow(QMainWindow):
         if self.project['start'] is None:
             self.snapshot();self.project['start']=[self.fix.x,self.fix.y];self.autosave.start();self.refresh_lists();self.refresh_map()
         anchors=[[self.fix.x,self.fix.y],*self.project['waypoints'],self.project['destination']]
-        if not self.plan_route(quiet=True,anchors=anchors):return
-        self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip'])
+        if not self.plan_route(quiet=True,anchors=anchors):
+            self.set_hud({'state':'offroute','text':'无可行路线'});self.notify(self.route_label.text());return
+        self.start_trip_navigation()
         self.update_minimap_overlay()
         self.hud.show();self.notify('导航已开始 · 定位失效时暂停播报')
 
+    def start_trip_navigation(self,lap=0,leg='去程',preserve_arrival=False):
+        lock=self.navigator.arrival_lock if preserve_arrival else None
+        goal=self.project['start'] if lap%2 else self.project['destination']
+        return_goal=self.project['destination'] if lap%2 else self.project['start']
+        self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip'],goal,return_goal)
+        self.navigator.lap=lap;self.navigator.leg=leg;self.navigator.arrival_lock=lock
+
+    def road_gap(self,point):
+        extra=(self.full_route or self.route) if self.active_favorite() else None
+        return distance_to_roads(point,self.project['roads'],self.project['policy']['allowed'],self.project['avoid'],extra)*(self.project['meters_per_pixel'] or 1)
+
     def stop_navigation(self,*_,quiet=False):
+        self.big_resume=None
         self.minimap_overlay.hide()
         self.navigator.stop();self.pending_start=False;self.tts.stop();self.set_hud({'state':'idle','text':'导航已停止'})
         if not quiet:self.notify('导航已停止')
 
     def worker_error(self,text,map_id=None,generation=0):
         if map_id is not None and ((map_id,generation)!=self.worker.context or map_id!=self.project['map']):return
+        self.hide_game_map()
         self.fix=Fix(reason=text,map_id=self.worker.context[0],generation=self.worker.context[1])
         self.remember_frame(self.fix,None,'worker_error')
         self.invalidate_fix(text);self.notify(text)
@@ -923,8 +947,12 @@ class MainWindow(QMainWindow):
         self.map.update_fix(self.fix)
         self.minimap_overlay.hide()
         self.capture_button.setText('关闭定位' if self.worker.capture else '开启定位')
-        self.fix_label.setText('定位丢失 · 已暂停播报');self.fix_detail.setText(reason)
+        self.fix_detail.setText(reason)
         self.navigator.lost();self.tts.stop();self.set_hud({'state':'lost','text':'定位丢失'})
+        if self.big_view_available():
+            self.set_localization(self.big_localization())
+            self.set_hud({'state':'bigmap','text':'大地图操作中'})
+        else:self.set_localization('定位丢失 · 已暂停播报')
 
     def remember_frame(self,fix,frame,source):
         self.frame=frame
@@ -942,6 +970,7 @@ class MainWindow(QMainWindow):
     def on_fix(self,fix,frame,live):
         if fix.map_id is not None and ((fix.map_id,fix.generation)!=self.worker.context or fix.map_id!=self.project['map']):return
         if live and not self.worker.capture:return
+        if live and fix.session is not None and fix.session!=self.worker.session:return
         now=time.monotonic()
         if not live:self.failure_diagnostic=None
         if fix.valid and live and self.last_accepted and now-self.last_accepted_time<8:
@@ -955,18 +984,22 @@ class MainWindow(QMainWindow):
         self.remember_frame(fix,frame,'live' if live else 'image')
         self.map.update_fix(fix)
         if fix.valid:
-            self.fix_label.setText(('实时定位' if live else '图片检验')+f' · {fix.confidence:.0%}')
+            if live:self.hide_game_map()
+            self.set_localization(('实时定位' if live else '图片检验')+f' · {fix.confidence:.0%}')
+            if self.hud.data.get('state') in ('lost','bigmap','locating','capture_off'):
+                self.set_hud({'state':'idle','text':'等待导航' if live else '图片检验成功'})
             heading=f'{fix.heading:.0f}°' if fix.heading is not None else '未知'
             self.fix_detail.setText(f'位置 {fix.x:.1f}, {fix.y:.1f}  ·  匹配点 {fix.inliers}\n误差 {fix.error:.2f}px  ·  朝向 {heading}')
             if live:self.last_accepted=[fix.x,fix.y];self.last_accepted_time=now
         else:
             self.invalidate_fix(fix.reason);return
+        if self.big_resume and live:self.plan_big_resume([fix.x,fix.y])
         if self.pending_start and live:self.begin_navigation()
         if self.navigator.active and live:
-            data=self.navigator.update([fix.x,fix.y],now)
+            data=self.navigator.update([fix.x,fix.y],now,self.road_gap([fix.x,fix.y]))
             if data:
                 self.set_hud(data)
-                if data.get('state')=='offroute':self.tts.stop()
+                if data.get('state') in ('offroute','waiting_road'):self.tts.stop()
                 if data.get('speech'):self.speak(data['speech'])
                 if data.get('state')=='turnaround':self.next_leg()
                 if data.get('replan'):self.replan_navigation()
@@ -982,12 +1015,15 @@ class MainWindow(QMainWindow):
             if projection and projection[1]>old.progress+3:remaining.append(p)
         goal=self.project['start'] if old.lap%2 else self.project['destination']
         lap,leg=old.lap,old.leg
+        route,full=self.route,self.full_route
         if self.plan_route(quiet=True,anchors=[[self.fix.x,self.fix.y],*remaining,goal]):
             self.tts.stop()
-            old.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip']);old.lap=lap;old.leg=leg
+            self.start_trip_navigation(lap,leg,preserve_arrival=True)
             self.speak('路线已重新规划');self.notify('已按原路线规则与剩余途经点重算')
         else:
-            old.stop();self.tts.stop();self.set_hud({'state':'offroute','text':'无可行路线'});self.notify('偏航后未找到可行路线，请调整道路或途经点')
+            self.route,self.full_route=route,full;self.refresh_map()
+            old.defer_replan([self.fix.x,self.fix.y],time.monotonic())
+            self.tts.stop();self.set_hud({'state':'waiting_road','text':'请返回道路'});self.notify('暂未找到可行路线；保留行程，返回可用道路后继续')
 
     def next_leg(self):
         # Rebuild from the original journey endpoints even after an earlier
@@ -996,20 +1032,30 @@ class MainWindow(QMainWindow):
         waypoints=list(self.project['waypoints'])
         if lap%2:waypoints.reverse()
         goal=self.project['start'] if lap%2 else self.project['destination']
+        route=self.navigator.route;full=self.full_route.reversed() if self.full_route else route
         if self.plan_route(quiet=True,anchors=[[self.fix.x,self.fix.y],*waypoints,goal]):
-            self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip']);self.navigator.lap=lap;self.navigator.leg=leg
+            self.start_trip_navigation(lap,leg,preserve_arrival=True)
         else:
-            self.navigator.stop();self.tts.stop();self.set_hud({'state':'offroute','text':'返程道路不连通'});self.notify('下一程没有可行路线，请调整危险区或道路规则')
+            self.route,self.full_route=route,full;self.refresh_map()
+            self.navigator.goal=list(goal);self.navigator.return_goal=list(self.project['destination'] if lap%2 else self.project['start'])
+            self.navigator.defer_replan([self.fix.x,self.fix.y],time.monotonic())
+            self.tts.stop();self.set_hud({'state':'waiting_road','text':'请返回道路'});self.notify('已保留下一程，返回可用道路后继续')
 
     def check_stale(self):
+        if self.big_view is not None:
+            if not self.game_map_active():self.hide_game_map()
+            elif not self.big_view_fresh():
+                self.set_localization(self.big_localization());self.update_big_overlay()
         if time.monotonic()-self.fix_time>2.5:
             self.minimap_overlay.hide()
         keep_on_top(self.hud)
         if self.minimap_overlay.isVisible():keep_on_top(self.minimap_overlay)
+        if self.big_overlay.isVisible():keep_on_top(self.big_overlay)
         if self.fix_live and time.monotonic()-self.fix_time>2.5:
             self.invalidate_fix('超过 2.5 秒未收到有效实时位置，等待重新定位')
 
-    def select_region(self):
+    def select_region(self,large=False):
+        self.reset_game_map();self.worker.reset_view()
         self.worker.capture=False;self.capture_button.setText('开启定位');self.stop_navigation(quiet=True)
         if not self.monitors:self.notify('未找到可捕获的显示器');return
         index=max(0,self.screen_combo.currentIndex());monitor=self.monitors[index]
@@ -1018,15 +1064,17 @@ class MainWindow(QMainWindow):
             try:
                 import mss
                 with mss.MSS() as sct:frame=np.asarray(sct.grab(monitor))[:,:,:3].copy()
-                self.show();dialog=RegionDialog(frame,monitor,self)
+                self.show();dialog=RegionDialog(frame,monitor,self,large=large)
                 if dialog.exec()==QDialog.Accepted:
-                    self.settings['capture'].update(dialog.region)
-                    for key,field in self.capture_fields.items():field.setValue(dialog.region[key])
-                    self.save_settings();self.notify('识别区域已保存；确认玩家锚点后开启定位')
+                    self.settings['bigmap_capture' if large else 'capture'].update(dialog.region)
+                    for key,field in (self.big_fields if large else self.capture_fields).items():field.setValue(dialog.region[key])
+                    if large:self.big_enabled.setChecked(True)
+                    self.save_settings();self.notify('大地图区域已保存；开启定位后自动切换识别' if large else '识别区域已保存；确认玩家锚点后开启定位')
             except Exception as error:self.show();self.notify(f'无法捕获显示器：{error}')
         QTimer.singleShot(350,grab)
 
     def capture_setting(self,key,value):
+        self.reset_game_map();self.worker.reset_view()
         self.settings['capture'][key]=value;self.fix_live=False;self.save_settings()
 
     def anchor_setting(self):self.settings['anchor']=[self.anchor_x.value()/100,self.anchor_y.value()/100];self.fix_live=False;self.save_settings()
@@ -1063,7 +1111,9 @@ class MainWindow(QMainWindow):
             target=Path(path)
             if has_frame:cv2.imencode('.png',frame)[1].tofile(str(target.with_suffix('.png')))
             metadata=dict(metadata,selected='latest_failure' if is_failure else 'latest_frame',
-                          saved_at=time.time(),current_fix=asdict(self.fix) if self.fix else None)
+                          saved_at=time.time(),current_fix=asdict(self.fix) if self.fix else None,
+                          last_hotkey=self.global_hotkeys.last_event,hotkey_status=self.hotkey_status.text(),
+                          last_map_action=self.big_message)
             atomic_json(target.with_suffix('.json'),metadata)
             self.notify('已保存最近失败帧 PNG 与诊断 JSON' if has_frame and is_failure else
                         '已保存小地图 PNG 与诊断 JSON' if has_frame else '未取得截图；已保存错误诊断 JSON')
@@ -1077,6 +1127,9 @@ class MainWindow(QMainWindow):
             self.navigator.cues=cues_for(self.navigator.route,self.project['notes'],self.settings['mode'],self.project['meters_per_pixel'] or 1);self.navigator.spoken.clear()
             self.set_hud({'state':'idle','text':'WRC 路书' if self.settings['mode']=='wrc' else '常规导航'})
         else:self.set_hud({'state':'idle','text':'等待导航'})
+
+    def set_localization(self,text):
+        self.fix_label.setText(text);self.hud.set_localization(text)
 
     def set_hud(self,data):self.hud.set_data(data,self.settings['mode'],self.project['meters_per_pixel'] is not None)
 
@@ -1142,6 +1195,7 @@ class MainWindow(QMainWindow):
             f'配置自动保存在：{user_dir()}\n导出 JSON 可备份或共享完整地图配置。')
 
     def closeEvent(self,event):
+        self.cursor_timer.stop();self.global_hotkeys.close();self.big_overlay.close()
         self.minimap_overlay.close()
         self.watchdog.stop();self.autosave.stop();self.tts.stop();self.hud.close();self.worker.shutdown();self.save_project();self.save_settings();event.accept()
 

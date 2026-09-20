@@ -9,7 +9,7 @@ from dataclasses import asdict
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimer,QPointF
 from .model import asset_path,read_project,atomic_json,validate_project
-from .vision import Locator,read_image,Fix
+from .vision import Locator,read_image,Fix,MapViewFix
 from .routing import plan,blocked
 from .navigation import Navigator,cues_for
 from .library import saved_route,supplement_roads,library_payload,merge_library,snap_saved,follow_saved
@@ -31,6 +31,8 @@ def run_selftest(output):
         fix=locator.locate(sample)
         report['localization']=asdict(fix);assert fix.valid
         report['checks']['image_localization']=True
+        view=locator.locate_map(sample)
+        report['checks']['bigmap_localization']=bool(view.valid and np.linalg.norm(view.matrix@[sample.shape[1]/2,sample.shape[0]/2,1]-[fix.x,fix.y])<2)
         terrain=read_image(map_asset('ozeti','image'))
         ambiguous=cv2.resize(terrain[1177:1313,437:573],(340,340))
         ambiguous[148:193,148:193]=(70,70,70)
@@ -58,10 +60,26 @@ def run_selftest(output):
             and window.map.player_item is None and '100%' not in window.fix_label.text())
         window.on_fix(Fix(reason='合成单帧异常'),ambiguous,True)
         window.on_fix(fix,sample,True)
+        report['checks']['hud_localization_recovers_without_navigation']=(window.hud.data['state']!='lost'
+            and window.hud.localization_text==window.fix_label.text() and '实时定位' in window.hud.localization_text)
         report['checks']['failure_frame_retained_after_recovery']=(window.fix_live
             and np.array_equal(window.failure_diagnostic[0],ambiguous)
             and not window.failure_diagnostic[1]['fix']['valid'])
+        window.toggle_capture();window.toggle_capture();window.on_fix(fix,sample,True)
+        report['checks']['capture_restart_restores_hud_title']=(window.fix_live
+            and window.hud.data['text']=='等待导航' and window.hud.localization_text==window.fix_label.text())
         window.worker.capture=False
+        window.arrival_radius.setValue(180)
+        report['checks']['arrival_radius_control']=window.settings['arrival_m']==180
+        window.arrival_radius.setValue(25)
+        from .routing import Route
+        short=Route([[0,0],[500,0]],['major'],['fixture'],500,[0,0],0)
+        check_nav=Navigator();check_nav.start(short,[],window.settings,1,True,goal=[500,60],return_goal=[0,0])
+        wait=check_nav.update([100,100],0,100)
+        report['checks']['offroad_wait_keeps_journey']=(wait['state']=='waiting_road' and not wait['replan'] and check_nav.active)
+        report['checks']['road_rejoin_replans']=check_nav.update([100,5],1,5)['replan']
+        check_nav.update([500,60],2,60)
+        report['checks']['arrival_uses_actual_offroad_goal']=check_nav.update([500,60],3,60)['state']=='turnaround'
         window.store_favorite(saved_route('打包验收路线',route));window.favorite_list.setCurrentRow(0);window.load_favorite()
         report['checks']['exact_favorite']=abs(window.route.length-route.length)<.1
         payload=library_payload(window.project,'routes');portable=output.with_name(output.stem+'-routes.json')
@@ -168,6 +186,42 @@ def run_selftest(output):
             report['checks']['clear_current_route']=(window.project['start'] is None and window.project['destination'] is None and not window.project['waypoints'] and not window.project.get('active_route_id')
                 and window.route is None and window.map.route is None and not window.navigator.active and not window.pending_start
                 and not window.minimap_overlay.isVisible() and window.worker.path_mask is None and window.hud.isVisible())
+            # Native overlay and hotkey dispatch on this diagnostic's own windows.
+            from .hotkeys import DEFAULT_HOTKEYS,physical_cursor
+            from PySide6.QtCore import Qt
+            window.settings['bigmap']['enabled']=True
+            big=MapViewFix(matrix=np.array([[1.,0,350],[0,1.,950]]),frame_size=(600,500),valid=True,
+                region=dict(left=200,top=200,width=600,height=500))
+            window.project['start']=[505,1245];window.project['destination']=[700,1200]
+            window.big_overlay.update_map(big,window.project)
+            app.processEvents()
+            report['checks']['bigmap_overlay_visible']=window.big_overlay.isVisible()
+            report['checks']['bigmap_mouse_passthrough']=bool(window.big_overlay.windowFlags()&Qt.WindowTransparentForInput)
+            report['checks']['bigmap_capture_exclusion_or_mask']=bool(window.big_overlay.capture_excluded or (window.worker.map_mask is not None and window.worker.map_mask.any()))
+            window.big_overlay.grab().save(str(output.with_name(output.stem+'-bigmap.png')))
+            window.big_overlay.hide()
+            report['checks']['physical_cursor_api']=physical_cursor() is not None
+            statuses=[];triggered=[]
+            window.global_hotkeys.status.connect(statuses.append);window.global_hotkeys.triggered.connect(triggered.append)
+            window.global_hotkeys.configure(dict(DEFAULT_HOTKEYS));window.global_hotkeys.set_active(True)
+            report['checks']['global_hotkeys_registered']=len(window.global_hotkeys.registered)==len(DEFAULT_HOTKEYS)
+            if window.global_hotkeys.registered:
+                import ctypes
+                from ctypes import wintypes
+                ident=next(iter(window.global_hotkeys.registered))
+                api=ctypes.WinDLL('user32',use_last_error=True).PostThreadMessageW
+                api.argtypes=[wintypes.DWORD,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM];api.restype=wintypes.BOOL
+                for _ in range(3):api(ctypes.windll.kernel32.GetCurrentThreadId(),0x0312,ident,0)
+                app.processEvents()
+                report['checks']['global_hotkey_repeated_native_dispatch']=len(triggered)==3
+            window.global_hotkeys.set_active(False)
+            symbol_keys=dict(DEFAULT_HOTKEYS,navigate='Ctrl+*',destination='Ctrl+Alt+]',start='Ctrl+Alt+[')
+            window.global_hotkeys.configure(symbol_keys);window.global_hotkeys.set_active(True)
+            report['checks']['symbol_hotkeys_registered']=len(window.global_hotkeys.registered)==8
+            from .hotkeys import pressed_keys
+            report['checks']['native_key_state_api']=isinstance(pressed_keys({0x11,0x12,ord('D'),0xDB,0xDD,0x6A}),set)
+            window.global_hotkeys.set_active(False)
+            report['hotkey_status']=statuses
             window.grab().save(str(output.with_name(output.stem+'-cleared.png')))
             window.navigator.stop();window.watchdog.stop()
             # Exercise the production speech queue through the native SAPI
