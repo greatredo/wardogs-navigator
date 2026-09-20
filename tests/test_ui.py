@@ -42,6 +42,59 @@ def test_drag_rectangle_replans_real_map(window,app):
     window.undo();assert not window.project['avoid']
 
 
+def test_navigation_settings_and_soft_road_preferences_survive_restart(window,tmp_path):
+    from PySide6.QtWidgets import QGroupBox
+    from wardogs_nav.model import load_settings
+    titles={g.title() for g in window.findChildren(QGroupBox)}
+    assert {'常规导航设置','WRC 路书设置','通用驾驶提示'}<=titles
+    window.navigation_fields['lead_m'].setValue(240)
+    window.wrong_way_check.setChecked(False)
+    loaded=load_settings()
+    assert loaded['lead_m']==240 and 'normal_chain_count' not in loaded
+    assert 'normal_bends' not in loaded and not loaded['wrong_way_alert']
+    window.project['destination']=None;window.fix=None
+    window.kind_preferences['offroad'].setCurrentIndex(window.kind_preferences['offroad'].findData('prefer'))
+    window.kind_preferences['major'].setCurrentIndex(window.kind_preferences['major'].findData('avoid'))
+    window.save_project()
+    restored=MainWindow(start_worker=False)
+    try:
+        assert restored.kind_preferences['offroad'].currentData()=='prefer'
+        assert restored.kind_preferences['major'].currentData()=='avoid'
+        assert set(restored.project['policy']['allowed'])=={'major','minor','offroad'}
+        assert restored.navigation_fields['lead_m'].value()==240
+    finally:restored.close()
+
+
+def test_bridge_editor_and_drag_keep_ground_crossing_separate(window,app,monkeypatch):
+    from wardogs_nav.dialogs import RoadDialog
+    from wardogs_nav.model import read_project
+    from wardogs_nav.maps import project_path
+    window.fix=None;window.project['destination']=None
+    window.project['roads']=[dict(id=id,name=id,kind='major',points=points) for id,points in [
+        ('deck',[[100,100],[200,100],[300,100]]),
+        ('ground',[[200,50],[200,100],[200,150]]),
+        ('approach',[[100,50],[100,100]])]]
+    dialog=RoadDialog(window.project['roads'][0])
+    assert not dialog.bridge.isChecked() and not dialog.bridge_start.isEnabled()
+    dialog.bridge.setChecked(True)
+    assert dialog.bridge_start.isEnabled() and not dialog.values()['bridge_start'] and not dialog.values()['bridge_end']
+    dialog.close()
+    def edit(dialog):
+        dialog.bridge.setChecked(True);dialog.bridge_start.setChecked(True)
+        return QDialog.Accepted
+    monkeypatch.setattr(RoadDialog,'exec',edit)
+    window.refresh_lists();window.road_list.setCurrentRow(0);window.edit_road();app.processEvents()
+    assert window.project['roads'][0]['bridge'] and window.project['roads'][0]['bridge_start']
+    assert '[桥梁]' in window.road_list.item(0).text()
+    window.move_item(('road','deck',1),[220,110]);app.processEvents()
+    assert window.project['roads'][0]['points'][1]==[220,110]
+    assert window.project['roads'][1]['points'][1]==[200,100]
+    window.move_item(('road','deck',0),[105,100]);app.processEvents()
+    assert window.project['roads'][2]['points'][-1]==[105,100]
+    window.save_project()
+    assert read_project(project_path(window.project['map']))['roads'][0]['bridge']
+
+
 def test_drag_destination_changes_config_and_route(window,app):
     assert window.plan_route()
     window.move_item(('destination',0),[194,211]);app.processEvents()

@@ -230,6 +230,9 @@ class MapView(QGraphicsView):
                 if selected:
                     for i,p in enumerate(road['points']):
                         self.handle(p,'#f2cf75',('road',road['id'],i))
+                    if road.get('bridge'):
+                        for key,index,name in (('bridge_start',0,'桥起点'),('bridge_end',-1,'桥终点')):
+                            self.label(name+(' · 接地' if road.get(key) else ' · 不接地'),road['points'][index],'#f2cf75')
         for i, zone in enumerate(self.project['avoid']):
             x,y=zone['point']
             pen,brush=QPen(QColor('#ed7878'),2),QBrush(QColor(215,70,70,55))

@@ -123,6 +123,62 @@ def test_lost_fix_does_not_advance_or_retain_speed():
     assert nav.progress==progress and nav.speed==0 and nav.last_point is None
 
 
+def test_normal_nearby_junctions_use_v062_individual_speech():
+    r=route([[0,0],[200,0],[300,0],[300,300]])
+    r.junctions=[dict(at=200,delta=0),dict(at=300,delta=90)]
+    settings=default_settings();settings.update(lead_m=150,lead_s=0)
+    nav=Navigator();nav.start(r,[],settings,1)
+    assert nav.update([100,0],0)['speech']=='前方100米，路口直行'
+    assert nav.update([160,0],1)['speech'] is None
+    assert nav.update([220,0],2)['speech']=='前方80米，路口右转'
+    assert nav.update([260,0],3)['speech'] is None
+
+
+@pytest.mark.parametrize('mode',['normal','wrc'])
+def test_wrong_way_warns_once_and_recovers_without_losing_trip(mode):
+    nav=Navigator();settings=default_settings();settings['mode']=mode
+    r=route([[0,0],[1000,0]]);nav.start(r,[],settings,1,True)
+    nav.lap=1;nav.leg='返程'
+    assert nav.update([500,0],0)['state']=='navigating'
+    assert nav.update([490,0],1)['state']=='navigating'
+    data=nav.update([480,0],2)
+    assert data['state']=='wrongway' and data['cue'].kind=='uturn' and '安全位置掉头' in data['speech']
+    assert nav.update([470,0],3)['speech'] is None
+    assert nav.update([480,0],4)['state']=='wrongway'
+    assert nav.update([490,0],5)['state']=='navigating'
+    assert nav.active and nav.roundtrip and nav.route is r and nav.lap==1 and nav.goal==[1000,0]
+
+
+def test_wrong_way_ignores_jitter_brief_reversing_gaps_and_offroad():
+    nav=Navigator();settings=default_settings();r=route([[0,0],[1000,0]])
+    for samples in [[(500,0),(498,1),(501,2),(497,3),(502,4)],
+                    [(500,0),(490,1),(500,2),(510,3)],
+                    [(500,0),(480,5),(450,10)]]:
+        nav.start(r,[],settings,1)
+        for x,t in samples:assert nav.update([x,0],t)['state']!='wrongway'
+    nav.start(r,[],settings,1)
+    for t in range(4):assert nav.update([500-t*10,60],t,60)['state']=='waiting_road'
+    settings['wrong_way_alert']=False;nav.start(r,[],settings,1)
+    for t in range(4):assert nav.update([500-t*10,0],t)['state']!='wrongway'
+
+
+def test_following_hairpin_is_not_wrong_way():
+    r=route([[0,0],[100,0],[100,30],[0,30]])
+    nav=Navigator();nav.start(r,[],default_settings(),1)
+    for t,p in enumerate([[60,0],[80,0],[100,0],[100,15],[100,30],[80,30],[60,30]]):
+        assert nav.update(p,t)['state']!='wrongway'
+
+
+def test_starting_in_opposite_direction_warns_behind_first_route_point():
+    nav=Navigator();nav.start(route([[500,100],[1500,100]]),[],default_settings(),1)
+    nav.update([500,100],0,0)
+    assert nav.update([460,100],1,0)['state']=='navigating'
+    data=nav.update([420,100],2,0)
+    assert data['state']=='wrongway' and data['remaining']==1000 and nav.progress==0
+    assert nav.update([400,100],3,0)['speech'] is None
+    assert nav.update([450,100],4,0)['state']!='wrongway'
+
+
 def test_offroute_waits_for_three_fixes():
     nav=Navigator();settings=default_settings();settings['offroute_m']=20
     nav.start(route([[0,0],[100,0]]),[],settings,1)

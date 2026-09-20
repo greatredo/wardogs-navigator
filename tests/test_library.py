@@ -21,6 +21,18 @@ def base(roads=None):
 policy=dict(allowed=['major','minor','offroad'],confirmed_only=False)
 
 
+def test_saved_path_is_preserved_but_connector_uses_preferences():
+    roads=[dict(id=id,name=id,kind=kind,confirmed=True,points=points) for id,kind,points in [
+        ('direct','major',[[0,50],[100,50]]),
+        ('field','offroad',[[0,50],[0,90],[100,90],[100,50]]),
+        ('saved','major',[[100,50],[200,50]])]]
+    saved=dict(id='favorite',name='原走法',points=[[100,50],[200,50]],kinds=['major'])
+    preferences=dict(policy,preferences={'major':'avoid','minor':'normal','offroad':'prefer'})
+    result=follow_saved(roads,saved,preferences,start=[0,50])
+    assert 'field' in result.road_ids and 'direct' not in result.road_ids
+    assert result.points[-1]==(200.,50.) and result.kinds[-1]=='major'
+
+
 def test_supplement_only_internal_gap_and_idempotent():
     roads=[road('before',[[0,0],[40,0]]),road('after',[[60,0],[100,0]])]
     saved=favorite([[0,0],[100,0]],['offroad'])

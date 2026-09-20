@@ -143,6 +143,7 @@ class Navigator:
         self.arrival_lock = None
         self.waiting_for_road = False
         self.replan_retry = None
+        self.reset_direction()
 
     def start(self, route, notes, settings, scale, roundtrip=False, goal=None, return_goal=None):
         self.route = route
@@ -167,6 +168,7 @@ class Navigator:
         self.arrival_lock = None
         self.waiting_for_road = False
         self.replan_retry = None
+        self.reset_direction()
 
     def stop(self):
         self.active = False
@@ -177,6 +179,44 @@ class Navigator:
         self.last_time = None
         self.last_point = None
         self.speed = 0.
+        self.reset_direction()
+
+    def reset_direction(self):
+        self.direction_anchor=None
+        self.reverse_since=None
+        self.reverse_distance=0.
+        self.forward_distance=0.
+        self.wrong_way=False
+
+    def check_direction(self,point,now,s,gap):
+        """Confirm sustained backwards travel, not a stationary heading or jitter."""
+        if not self.settings.get('wrong_way_alert',True) or gap*self.scale>min(self.settings['offroute_m'],self.settings.get('road_tolerance_m',30)):
+            self.reset_direction();return False
+        anchor=self.direction_anchor
+        if anchor is None:
+            self.direction_anchor=(list(point),now,s);return False
+        old,t,old_s=anchor;dt=now-t;travel=distance(old,point)*self.scale
+        if dt<=0 or dt>3 or travel/dt>=85:
+            self.direction_anchor=(list(point),now,s)
+            self.reverse_since=None;self.reverse_distance=0.;self.forward_distance=0.
+            return False
+        if travel<6:return False
+        self.direction_anchor=(list(point),now,s)
+        middle=max(0,(old_s+s)/2);lengths=cumulative(self.route.points)
+        tangent=bearing(point_at(self.route.points,lengths,middle-5/self.scale),point_at(self.route.points,lengths,middle+5/self.scale))
+        angle=abs(angle_delta(tangent,bearing(old,point)))
+        delta=(s-old_s)*self.scale
+        if delta<-3 and angle>120:
+            if self.reverse_since is None:self.reverse_since=t
+            self.reverse_distance+=-delta;self.forward_distance=0.
+            if self.reverse_distance>=20 and now-self.reverse_since>=2 and not self.wrong_way:
+                self.wrong_way=True;return True
+        elif delta>3 and angle<60:
+            self.reverse_since=None;self.reverse_distance=0.;self.forward_distance+=delta
+            if self.forward_distance>=12:self.wrong_way=False
+        else:
+            self.reverse_since=None;self.reverse_distance=0.;self.forward_distance=0.
+        return False
 
     def defer_replan(self,point,now):
         self.waiting_for_road=True
@@ -225,6 +265,31 @@ class Navigator:
         # Constrain progress around the last segment to avoid jumping to a later
         # leg at a crossing or an out-and-back overlap.
         upper = math.inf if old_time is None else self.progress + max(45/self.scale, (self.speed*(dt or 1)+60)/self.scale)
+        # Look a little behind the accepted progress to identify reverse travel
+        # before it is mistaken for leaving the route. The usual progress window
+        # is retained until that direction has been confirmed.
+        backwards=max(120/self.scale,distance(point,old_point)+30/self.scale if old_point is not None else 0)
+        direction_projection=nearest_on_route(point,self.route.points,max(0,self.progress-backwards),upper)
+        if direction_projection and direction_projection[1]<1e-6:
+            # Starting a trip while facing away from it puts the vehicle behind
+            # the first route point. Extend only its first tangent for direction
+            # evidence; this does not create a drivable road or negative progress.
+            a,b=self.route.points[:2];length=distance(a,b)
+            ux,uy=(b[0]-a[0])/length,(b[1]-a[1])/length
+            extension=(point[0]-a[0])*ux+(point[1]-a[1])*uy
+            if extension<0:
+                lateral=abs((point[0]-a[0])*uy-(point[1]-a[1])*ux)
+                direction_projection=(lateral,extension,0,None)
+        announced=False
+        if direction_projection:
+            announced=self.check_direction(point,now,direction_projection[1],direction_projection[0])
+        if self.wrong_way:
+            self.progress=max(0,direction_projection[1])
+            future={c.id for c in self.cues if c.at>=self.progress-6/self.scale}
+            self.spoken.difference_update(future|{'along-'+id for id in future})
+            return {'state':'wrongway','text':'请安全掉头','cue':Cue('wrongway',self.progress,'uturn'),
+                    'speech':'行驶方向相反，请在安全位置掉头' if announced else None,
+                    'remaining':max(0,(self.route.length-self.progress)*self.scale),'leg':self.leg,'lap':self.lap}
         projection = nearest_on_route(point, self.route.points, max(0,self.progress-25/self.scale), upper)
         if projection is None:
             return {'state':'offroute','text':'偏离路线，请检查定位或重新规划','speech':None}

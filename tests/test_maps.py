@@ -40,14 +40,14 @@ def test_map_switch_preserves_each_project_and_remembers_selection(window,app,tm
         window.project['notes']=[dict(id='note',type='left',grade=3,point=[400,420],direction='both')]
         window.project['route_library']=[dict(id='route',name='收藏 '+mid,points=[[20,20],[30,20]],kinds=['offroad'])]
         window.project['meters_per_pixel']=2.+index
-        window.project['policy']['allowed']=['minor']
+        window.project['policy']['preferences']={'major':'avoid','minor':'prefer','offroad':'avoid'}
         snapshots[mid]=validate_project(window.project)
     assert project_path('ozeti')==tmp_path/'project.json'
     for mid in ['ozeti','bakurani','zestafona']:
         assert window.switch_map(mid)
         assert window.project==snapshots[mid]
         assert window.map.pixmap.width()==map_info(mid)['width']
-        assert window.kind_checks['minor'].isChecked() and not window.kind_checks['major'].isChecked()
+        assert window.kind_preferences['minor'].currentData()=='prefer' and window.kind_preferences['major'].currentData()=='avoid'
     window.save_project()
     assert all(load_map_project(mid)==data for mid,data in snapshots.items())
     assert load_settings()['map_id']=='zestafona'

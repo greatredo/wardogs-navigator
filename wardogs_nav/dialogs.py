@@ -27,11 +27,22 @@ class RoadDialog(QDialog):
         self.note=QLineEdit(road.get('note',''))
         form.addRow('名称',self.name);form.addRow('分类',self.kind);form.addRow('备注',self.note)
         layout.addLayout(form)
-        label=QLabel('保存后即可用于规划；路线是否使用此道路取决于道路分类和危险区域。');label.setWordWrap(True);layout.addWidget(label)
+        self.bridge=QCheckBox('桥梁（与地面道路分层）');self.bridge.setChecked(road.get('bridge',False));layout.addWidget(self.bridge)
+        self.bridge_start=QCheckBox('起点接地（真实桥头 / 匝道）');self.bridge_start.setChecked(road.get('bridge_start',False));layout.addWidget(self.bridge_start)
+        self.bridge_end=QCheckBox('终点接地（真实桥头 / 匝道）');self.bridge_end.setChecked(road.get('bridge_end',False));layout.addWidget(self.bridge_end)
+        points=road.get('points',[])
+        if points:
+            label=QLabel(f'道路起点 ({points[0][0]:.1f}, {points[0][1]:.1f}) → 终点 ({points[-1][0]:.1f}, {points[-1][1]:.1f})');label.setWordWrap(True);layout.addWidget(label)
+        def bridge_options(value):
+            self.bridge_start.setEnabled(value);self.bridge_end.setEnabled(value)
+        self.bridge.toggled.connect(bridge_options);bridge_options(self.bridge.isChecked())
+        label=QLabel('桥面交叉处不与地面连通。只在真实桥头勾选接地；桥梁分成多条道路时，中间相接的端点不要勾选。道路类型仍遵循偏好，危险区禁止通行。');label.setWordWrap(True);layout.addWidget(label)
         buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
 
     def values(self):
-        return dict(name=self.name.text().strip() or '未命名道路',kind=self.kind.currentData(),confirmed=True,note=self.note.text())
+        return dict(name=self.name.text().strip() or '未命名道路',kind=self.kind.currentData(),confirmed=True,note=self.note.text(),
+                    bridge=self.bridge.isChecked(),bridge_start=self.bridge.isChecked() and self.bridge_start.isChecked(),
+                    bridge_end=self.bridge.isChecked() and self.bridge_end.isChecked())
 
 
 class FavoriteImportDialog(QDialog):
