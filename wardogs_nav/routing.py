@@ -272,13 +272,16 @@ def junctions_on_route(nodes, adjacency, route):
         center = point_at(route.points,lengths,s)
         incoming = bearing(point_at(route.points,lengths,s-8),center)
         outgoing = bearing(center,point_at(route.points,lengths,s+8))
-        result.append({'at':s,'delta':angle_delta(incoming,outgoing)})
+        result.append({'at':s,'delta':angle_delta(incoming,outgoing),
+                       'ordinary_crossing':any(r['kind']!='offroad' for _,_,r in edges)})
     result.sort(key=lambda j:j['at'])
     # Nearby vertices can represent the same wide junction.
     merged = []
     for item in result:
         if merged and item['at']-merged[-1]['at'] < 3:
+            ordinary=item['ordinary_crossing'] or merged[-1]['ordinary_crossing']
             if abs(item['delta']) > abs(merged[-1]['delta']):merged[-1]=item
+            merged[-1]['ordinary_crossing']=ordinary
         else:merged.append(item)
     return merged
 

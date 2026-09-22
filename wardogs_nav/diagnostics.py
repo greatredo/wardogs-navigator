@@ -124,6 +124,32 @@ def run_selftest(output):
         bridge_dialog=RoadDialog(deck,window);bridge_dialog.bridge_start.setChecked(True)
         report['checks']['bridge_editor_explicit_ports']=bridge_dialog.values()['bridge_start'] and not bridge_dialog.values()['bridge_end']
         bridge_dialog.show();app.processEvents();bridge_dialog.grab().save(str(output.with_name(output.stem+'-bridge-editor.png')));bridge_dialog.close()
+        from .recording import RoadRecorder,add_recorded_roads
+        from .navigation import cue_text
+        recorded,count=add_recorded_roads([ground],[[[100,300],[500,300]]])
+        report['checks']['recorded_crossing_split']=(count==2 and plan(recorded,[[100,300],[300,500]],['major','offroad']).length==400)
+        crossing=plan(recorded,[[100,300],[500,300]],['major','offroad'])
+        report['checks']['offroad_crossing_prompt']=any('进入越野路段' in cue_text(c,'normal') for c in cues_for(crossing,[],'normal'))
+        from wardogs_audio.pack import DefaultVoicePack
+        report['checks']['offroad_local_audio']=bool(DefaultVoicePack().segments('前方100米，左转进入越野路段'))
+        recorder=RoadRecorder()
+        for pass_index,xs in enumerate((range(10,121,5),range(120,9,-5),range(10,121,5))):
+            for i,x in enumerate(xs):recorder.feed([x,100],pass_index*100+i*.5,True)
+            recorder.disconnect()
+        report['checks']['recording_independent_passes']=len(recorder.ready(3))>=3
+        from PySide6.QtCore import QPoint,Qt
+        from PySide6.QtGui import QWheelEvent
+        spin=window.record_minimum;before=spin.value();spin.setFocus();pos=spin.rect().center()
+        app.sendEvent(spin,QWheelEvent(QPointF(pos),QPointF(spin.mapToGlobal(pos)),QPoint(),QPoint(0,-120),Qt.NoButton,Qt.NoModifier,Qt.NoScrollPhase,False))
+        report['checks']['settings_wheel_keeps_value']=spin.value()==before
+        window.tabs.setCurrentIndex(next(i for i in range(window.tabs.count()) if window.tabs.tabText(i)=='地图标注'))
+        window.tabs.currentWidget().ensureWidgetVisible(window.record_start)
+        window.start_recording();window.recorder.feed([100,300],0);window.recorder.feed([110,300],1)
+        window.update_recording_status();app.processEvents()
+        window.tabs.currentWidget().ensureWidgetVisible(window.record_status);app.processEvents()
+        report['checks']['recording_controls']=window.record_finish.isEnabled() and not window.record_start.isEnabled()
+        window.grab().save(str(output.with_name(output.stem+'-recording.png')))
+        window.recorder.stop();window.update_recording_status();window.tabs.setCurrentIndex(0)
         wrc_settings=dict(window.settings,mode='wrc',wrc_lead_m=150.,wrc_lead_s=0.)
         notes=[dict(id='left',point=[150,100],type='left',grade=3,direction='forward',bearing=90),
                dict(id='brake',point=[170,100],type='hard_brake',grade=1,direction='forward',bearing=90),

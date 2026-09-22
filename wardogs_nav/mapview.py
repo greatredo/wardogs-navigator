@@ -65,6 +65,7 @@ class MapView(QGraphicsView):
         self.show_roads = True
         self.zoomed = False
         self.player_item = None
+        self.recording_paths=[];self.recording_items=[]
         self.danger_start = None
         self.danger_preview = None
 
@@ -203,6 +204,12 @@ class MapView(QGraphicsView):
             pen.setStyle(Qt.DashLine)
         item = self.scene().addPath(path,pen)
         item.setZValue(z)
+        return item
+
+    def update_recording(self,paths):
+        for item in self.recording_items:self.scene().removeItem(item)
+        self.recording_paths=paths
+        self.recording_items=[self.line(p,'#f5ad66',3,z=11) for p in paths if len(p)>1]
 
     def label(self, text, point, color='#f4f6f7'):
         item = self.scene().addSimpleText(text,QFont('Microsoft YaHei UI',9))
@@ -218,6 +225,7 @@ class MapView(QGraphicsView):
 
     def redraw(self):
         self.scene().clear()
+        self.recording_items=[]
         self.player_item = None
         self.danger_preview=None
         self.scene().addPixmap(self.pixmap)
@@ -274,6 +282,7 @@ class MapView(QGraphicsView):
         self.line(self.draft,'#ffffff',1 if self.draft_path else 3,True,13)
         for p in self.draft:
             self.scene().addEllipse(p[0]-2,p[1]-2,4,4,QPen(QColor('white')),QBrush(QColor('white')))
+        self.update_recording(self.recording_paths)
         self.update_fix(self.fix)
 
     def update_fix(self, fix):

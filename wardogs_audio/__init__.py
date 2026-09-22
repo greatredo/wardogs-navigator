@@ -1,1 +1,1 @@
-"""Local audio shared by the navigator and optional pilot component."""
+"""Process-isolated speech synthesis and local file playback."""

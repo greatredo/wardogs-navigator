@@ -17,17 +17,12 @@ NOTE_TYPES = {'left': '左弯', 'right': '右弯', 'straight': '直行',
               'caution': '注意', 'water': '涉水'}
 MODIFIERS = {'long': '长弯', 'tightens': '收紧', 'opens': '放开', 'dont_cut': '别切', 'cut': '可切'}
 
-# Set only by a standalone optional component before loading shared maps.
-ASSET_ROOT = None
-
 
 def uid():
     return uuid.uuid4().hex[:12]
 
 
 def asset_path(name):
-    if ASSET_ROOT is not None:
-        return Path(ASSET_ROOT) / name
     return Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1])) / 'assets' / name
 
 
@@ -54,6 +49,7 @@ def default_settings():
             'lead_m': 100., 'lead_s': 4., 'arrival_m': 25., 'offroute_m': 80.,
             'wrong_way_alert': True,
             'road_tolerance_m': 30.,
+            'recording_auto': False, 'recording_minimum': 3,
             'wrc_lead_m': 150., 'wrc_lead_s': 5., 'wrc_chain_m': 60.,
             'main_topmost': False,
             'bigmap': {'enabled': False, 'opacity': .9, 'line_width': 4, 'avoid_radius_m': 50},
