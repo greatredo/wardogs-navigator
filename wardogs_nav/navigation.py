@@ -14,6 +14,7 @@ class Cue:
     lead_m: float = 0
     inferred: bool = False
     modifiers: list = field(default_factory=list)
+    enter_offroad: bool = False
 
 
 def geometric_cues(route, scale):
@@ -99,13 +100,28 @@ def cues_for(route, notes, mode, scale=1.):
                 nearby=[c for c in cues if c.inferred and abs(c.at-s)<=25]
                 if nearby:cues.remove(min(nearby,key=lambda c:abs(c.at-s)))
             cues.append(Cue(note['id'], s, kind, note['grade'], text, note.get('lead_m',0),False,modifiers))
+    from bisect import bisect_right
+    entries={lengths[i]:i for i,kind in enumerate(route.kinds) if i and kind=='offroad' and route.kinds[i-1]!='offroad'}
+    for junction in route.junctions:
+        i=min(len(route.kinds)-1,bisect_right(lengths,junction['at']+1e-6)-1)
+        if i>0 and junction.get('ordinary_crossing') and route.kinds[i]=='offroad':entries[junction['at']]=i
+    for at,i in entries.items():
+        nearby=next((c for c in cues if abs(c.at-at)<1e-5),None)
+        if nearby:nearby.enter_offroad=True;continue
+        delta=angle_delta(bearing(points[i-1],points[i]),bearing(points[i],points[i+1]))
+        magnitude=abs(delta);direction='right' if delta>0 else 'left'
+        turn='straight' if magnitude<22 else 'keep_'+direction if magnitude<40 else direction if magnitude<150 else 'uturn'
+        cues.append(Cue(f'offroad-{i}',at,turn if mode=='normal' else 'straight',enter_offroad=True))
     cues.append(Cue('arrival', lengths[-1], 'arrival'))
     return sorted(cues, key=lambda c:c.at)
 
 
 def cue_text(cue, mode, spoken=False):
+    if cue.enter_offroad and mode=='normal':
+        return {'straight':'直行','left':'左转','right':'右转','keep_left':'向左前方','keep_right':'向右前方','uturn':'掉头'}.get(cue.kind,'')+'进入越野路段'
+    if cue.enter_offroad and cue.id.startswith('offroad-'):return '进入越野路段'
     if cue.text:
-        return cue.text
+        return cue.text+('，进入越野路段' if cue.enter_offroad else '')
     if cue.kind == 'arrival':
         return '到达目的地'
     if cue.kind in ('left', 'right'):
@@ -117,6 +133,7 @@ def cue_text(cue, mode, spoken=False):
         text={'straight':'路口直行' if mode=='normal' else '直线',
               'keep_left':'路口向左前方','keep_right':'路口向右前方','uturn':'掉头'}.get(cue.kind,NOTE_TYPES.get(cue.kind,'继续前进'))
     if mode=='wrc' and cue.modifiers:text+='，'+'，'.join(MODIFIERS[m] for m in cue.modifiers)
+    if cue.enter_offroad:text+='，进入越野路段'
     return text
 
 

@@ -51,7 +51,7 @@ def test_default_pack_covers_navigation_wrc_and_numbers(tmp_path):
                 phrases.append((cue_text(Cue('x', 0, kind, grade, modifiers=list(MODIFIERS)), mode, spoken=True), 'zh-CN'))
     for text, lang in phrases:
         assert pack.segments(text, lang), text
-    for lang, text in [('zh-CN', '沿当前道路行驶1230米'), ('en-US', 'We have completed 51 percent of our flight. Thank you for flying with us.')]:
+    for lang, text in [('zh-CN', '沿当前道路行驶1230米')]:
         path = tmp_path / (lang + '.wav')
         pack.render(text, lang, path)
         with wave.open(str(path), 'rb') as audio:

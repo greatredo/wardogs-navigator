@@ -115,6 +115,7 @@ class GameMapController:
         self.game_window=view.foreground;self.worker.target_window=view.foreground;self.big_view=view
         self.big_tracking=True
         self.fix_live=False;self.minimap_overlay.hide();self.navigator.lost();self.tts.stop()
+        self.disconnect_recording()
         self.set_localization(self.big_localization())
         self.set_hud({'state':'bigmap','text':'大地图操作中'})
         self.big_status.setText(f'{view.reason} · {view.inliers} 个匹配点')

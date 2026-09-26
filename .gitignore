@@ -13,11 +13,6 @@ backups/
 AGENTS.md
 docs/实施记录.md
 docs/维护分析.md
-# The optional pilot component and its third-party software stay local.
-/pilot/
-/build-pilot.ps1
-/tests/test_pilot*.py
-/components/
 .env
 .env.*
 !.env.example

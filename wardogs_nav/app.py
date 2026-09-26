@@ -26,6 +26,8 @@ from .dialogs import RoadDialog,NoteDialog,RegionDialog,FavoriteImportDialog,num
 from .worker import CaptureWorker
 from .overlay import MinimapOverlay,keep_on_top
 from .game_map import GameMapController
+from .widgets import protect_settings_wheel
+from .recording_ui import RecordingController
 
 STYLE='''
 QWidget { background:#151d25; color:#e5ecee; font:10pt "Microsoft YaHei UI"; }
@@ -63,9 +65,10 @@ QStatusBar { background:#11191f; color:#9bb1bd; }
 '''
 
 
-class MainWindow(QMainWindow,GameMapController):
+class MainWindow(QMainWindow,GameMapController,RecordingController):
     def __init__(self, start_worker=True):
         super().__init__()
+        protect_settings_wheel()
         screen=QApplication.primaryScreen().availableGeometry()
         self.resize(min(1400,int(screen.width()*.94)),min(900,int(screen.height()*.92)))
         self.setMinimumSize(1000,660)
@@ -98,6 +101,7 @@ class MainWindow(QMainWindow,GameMapController):
         self.favorite_trip=None
         self.draft_kinds=[]
         self.navigator=Navigator()
+        self.init_recording()
         self.calibration_points=[]
         self.worker=CaptureWorker(self.settings)
         self.worker.result.connect(self.on_fix)
@@ -260,6 +264,7 @@ class MainWindow(QMainWindow,GameMapController):
         roads.addWidget(self.row(self.button('导入路网',lambda:self.import_library('roads')),self.button('导出路网',lambda:self.export_library('roads'))))
         roads.addWidget(self.button('载入内置路网',self.reload_roads))
         roads.addWidget(self.text('“移动 / 选路”中单击道路选中并拖点，双击编辑属性，右键可编辑或删除；也可从列表选择。绘制时 Enter / 双击结束，相交处需要显式节点。',True))
+        self.build_recording(layout)
         notes=self.group('WRC 路书',layout)
         self.note_list=QListWidget();self.note_list.setMaximumHeight(140);self.note_list.itemDoubleClicked.connect(lambda _:self.edit_note());notes.addWidget(self.note_list)
         notes.addWidget(self.row(self.button('地图添加',lambda:self.set_tool('note')),self.button('编辑',self.edit_note),self.button('删除',self.delete_note)))
@@ -372,11 +377,13 @@ class MainWindow(QMainWindow,GameMapController):
         except (OSError,ValueError,TypeError,KeyError) as error:
             self.notify(f'未切换地图：{error}');return False
         self.autosave.stop()
+        self.disconnect_recording();self.save_recording()
         if not self.save_project():return False
         self.stop_navigation(quiet=True);self.worker.capture=False;self.capture_button.setText('开启定位')
         self.reset_game_map()
         self.worker.request_map(map_id)
         self.settings['map_id']=map_id;self.project=target;self.history=[]
+        self.load_recording()
         self.route=None;self.full_route=None;self.favorite_trip=None;self.frame=None
         self.frame_diagnostic=None;self.failure_diagnostic=None
         self.fix=None;self.fix_live=False;self.fix_time=0.;self.pending_start=False
@@ -407,6 +414,7 @@ class MainWindow(QMainWindow,GameMapController):
         self.history.append(deepcopy(self.project));self.history=self.history[-30:]
 
     def changed(self,replan=True):
+        self.recorder.set_roads(self.project['roads'])
         resume=self.navigator.active and self.fix_live and self.fix and self.fix.valid
         leg,lap=self.navigator.leg,self.navigator.lap
         anchors=None
@@ -683,7 +691,8 @@ class MainWindow(QMainWindow,GameMapController):
         i=self.road_list.currentRow()
         if i<0:return
         dialog=RoadDialog(self.project['roads'][i],self)
-        if dialog.exec()==QDialog.Accepted:self.snapshot();self.project['roads'][i].update(dialog.values());self.changed()
+        if dialog.exec()==QDialog.Accepted:
+            self.snapshot();self.project['roads'][i].update(dialog.values());self.project['roads'][i].pop('recording',None);self.changed()
 
     def delete_road(self):
         i=self.road_list.currentRow()
@@ -773,6 +782,7 @@ class MainWindow(QMainWindow,GameMapController):
                 ports=[q for r in self.project['roads'] for q in bridge_ports(r)]
                 connected=[r for r in self.project['roads'] if roads_connect(road,r,old,ports)]
                 for r in connected:
+                    if any(distance(old,q)<1.5 for q in r['points']):r.pop('recording',None)
                     r['points']=[list(p) if distance(old,q)<1.5 else q for q in r['points']]
             elif kind=='start':self.project['start']=p;self.favorite_trip=None
             elif kind=='destination':self.detach_favorite();self.project['destination']=p
@@ -790,7 +800,7 @@ class MainWindow(QMainWindow,GameMapController):
             if kind=='road':
                 road=next(r for r in self.project['roads'] if r['id']==key[1])
                 if len(road['points'])<=2:self.notify('道路至少需要两个点；可在列表删除整条道路');return
-                road['points'].pop(key[2])
+                road['points'].pop(key[2]);road.pop('recording',None)
             elif kind=='start':
                 self.project['start']=None;self.favorite_trip=None;self.stop_navigation(quiet=True)
             elif kind=='destination':self.detach_favorite();self.project['destination']=None
@@ -970,6 +980,7 @@ class MainWindow(QMainWindow,GameMapController):
 
     def invalidate_fix(self,reason):
         self.fix_live=False
+        self.disconnect_recording()
         self.fix=replace(self.fix,valid=False,reason=reason) if self.fix else Fix(reason=reason)
         self.map.update_fix(self.fix)
         self.minimap_overlay.hide()
@@ -1020,6 +1031,7 @@ class MainWindow(QMainWindow,GameMapController):
             if live:self.last_accepted=[fix.x,fix.y];self.last_accepted_time=now
         else:
             self.invalidate_fix(fix.reason);return
+        self.record_fix(fix,now,live)
         if self.big_resume and live:self.plan_big_resume([fix.x,fix.y])
         if self.pending_start and live:self.begin_navigation()
         if self.navigator.active and live:
@@ -1249,6 +1261,7 @@ class MainWindow(QMainWindow,GameMapController):
             f'配置自动保存在：{user_dir()}\n导出 JSON 可备份或共享完整地图配置。')
 
     def closeEvent(self,event):
+        self.record_timer.stop();self.disconnect_recording();self.save_recording()
         self.cursor_timer.stop();self.global_hotkeys.close();self.big_overlay.close()
         self.minimap_overlay.close()
         self.watchdog.stop();self.autosave.stop();self.tts.close();self.hud.close();self.worker.shutdown();self.save_project();self.save_settings();event.accept()
@@ -1258,8 +1271,5 @@ def run():
     app=QApplication.instance() or QApplication([])
     app.setApplicationName('WardogsNavigator');app.setOrganizationName('WardogsNavigator')
     app.setStyle('Fusion');app.setStyleSheet(STYLE)
-    from .launcher import ModeDialog
-    selector=ModeDialog()
-    if selector.exec()!=QDialog.Accepted or selector.mode!='ground':return 0
     window=MainWindow();window.show()
     return app.exec()

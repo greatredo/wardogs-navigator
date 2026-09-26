@@ -22,8 +22,7 @@ def public_files():
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_audio').glob('*.py'))
     paths.append(Path('wardogs_audio/windows_speech.ps1'))
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_audio/assets').rglob('*') if p.is_file())
-    paths.extend(p.relative_to(ROOT) for p in (ROOT/'tests').glob('test_*.py')
-                 if not p.name.startswith('test_pilot'))
+    paths.extend(p.relative_to(ROOT) for p in (ROOT/'tests').glob('test_*.py'))
     # Community submissions are reviewed data and documentation, not executables.
     community=ROOT/'community'
     if community.is_dir():
