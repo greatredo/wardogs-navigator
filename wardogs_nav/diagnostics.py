@@ -291,7 +291,7 @@ def run_selftest(output):
                 if len(report['queue_started'])>=2 and window.tts.current is None and not window.tts.queue:
                     report['checks']['native_speech_queue']=True;QTimer.singleShot(0,finish_report)
             window.tts.started.connect(started);window.tts.completed.connect(completed)
-            window.speak('路口直行。');window.speak('左三，接右六。')
+            window.speak('前方250米，路口直行。');window.speak('一百米，左三，接右六。')
             QTimer.singleShot(20000,finish_report)
         else:finish_report()
       except Exception as error:
