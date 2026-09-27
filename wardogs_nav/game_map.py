@@ -59,6 +59,9 @@ class GameMapController:
         self.big_enabled=QCheckBox('启用大地图识别、叠加与快捷键')
         self.big_enabled.setChecked(self.settings['bigmap']['enabled'])
         self.big_enabled.toggled.connect(lambda v:self.big_setting('enabled',v));group.addWidget(self.big_enabled)
+        self.big_roads=QCheckBox('在大地图上显示路网')
+        self.big_roads.setChecked(self.settings['bigmap']['show_roads'])
+        self.big_roads.toggled.connect(lambda v:self.big_setting('show_roads',v));group.addWidget(self.big_roads)
         self.coordinate_enabled=QCheckBox('地形未匹配时读取十字坐标')
         self.coordinate_enabled.setChecked(self.settings['bigmap']['coordinates'])
         self.coordinate_enabled.toggled.connect(lambda v:self.big_setting('coordinates',v));group.addWidget(self.coordinate_enabled)
@@ -208,7 +211,7 @@ class GameMapController:
         if self.worker.request_action(action,point,self.game_window):self.map_feedback('正在核准鼠标位置…')
 
     def map_feedback(self,text):
-        self.big_message=text;self.big_message_until=time.monotonic()+5
+        self.big_message=text;self.big_message_until=time.monotonic()+2
         self.big_status.setText(text)
         self.hotkey_status.setText(text)
         self.update_big_overlay()
@@ -241,7 +244,7 @@ class GameMapController:
             self.changed();self.pending_start=True
             message='新路线已规划；关闭大地图后开始播报' if self.route else '目的地已设置；回到小地图后定位并规划'
             if self.project['start'] and not self.route:message='未找到可行路线；请调整目的地或道路规则'
-            self.set_hud({'state':'bigmap' if self.game_view_available() else 'locating','text':'目标已设置' if self.game_view_available() else '等待定位'})
+            self.flash_hud('目标已设置')
             self.map_feedback(message);self.hud.show();return
         if action=='undo':
             if not self.history:self.map_feedback('没有可撤销的标注');return

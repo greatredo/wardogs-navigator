@@ -115,6 +115,9 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         self.tts.cancelled.connect(lambda receipt:self.speech_result(receipt,False))
         self.voices=[]
         self.hud=Hud(self.settings['hud'])
+        self.hud_navigation=None;self.hud_problem=None;self.hud_notice=None
+        self.hud_notice_timer=QTimer(self);self.hud_notice_timer.setSingleShot(True)
+        self.hud_notice_timer.setInterval(2000);self.hud_notice_timer.timeout.connect(self.expire_hud_notice)
         self.minimap_overlay=MinimapOverlay(self.settings['minimap_overlay'])
         self.minimap_overlay.mask_changed.connect(lambda mask:setattr(self.worker,'path_mask',mask))
         self.init_game_map()
@@ -391,6 +394,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         self.fix=None;self.fix_live=False;self.fix_time=0.;self.pending_start=False
         self.last_accepted=None;self.last_accepted_time=0.;self.jump_candidate=None;self.jump_count=0
         self.navigator=Navigator();self.calibration_points=[];self.draft_kinds=[]
+        self.hud_problem=None;self.hud_navigation=None;self.refresh_hud()
         self.map.project=target;self.map.load_map(map_id);self.drawing_bar.hide();self.favorite_options.hide();self.favorite_preview_label.hide();self.draft_preview=None
         self.map_combo.blockSignals(True);self.map_combo.setCurrentIndex(self.map_combo.findData(map_id));self.map_combo.blockSignals(False)
         self.sync_policy();self.refresh_lists();self.refresh_map();self.update_scale_label()
@@ -926,6 +930,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
 
     def toggle_capture(self):
         self.reset_game_map();self.worker.reset_view()
+        if self.worker.capture or (self.hud_notice and self.hud_notice.get('state')=='capture_off'):self.clear_hud_notice()
         self.worker.capture=not self.worker.capture
         if self.worker.capture:
             self.failure_diagnostic=None
@@ -963,6 +968,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         return_goal=self.project['destination'] if lap%2 else self.project['start']
         self.navigator.start(self.route,self.project['notes'],self.settings,self.project['meters_per_pixel'],self.project['roundtrip'],goal,return_goal)
         self.navigator.lap=lap;self.navigator.leg=leg;self.navigator.arrival_lock=lock
+        self.hud_navigation=None;self.refresh_hud()
 
     def road_gap(self,point):
         extra=(self.full_route or self.route) if self.active_favorite() else None
@@ -971,8 +977,9 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
     def stop_navigation(self,*_,quiet=False):
         self.big_resume=None
         self.minimap_overlay.hide()
-        self.navigator.stop();self.pending_start=False;self.tts.stop();self.set_hud({'state':'idle','text':'导航已停止'})
-        if not quiet:self.notify('导航已停止')
+        self.navigator.stop();self.pending_start=False;self.tts.stop()
+        self.hud_navigation=None;self.clear_hud_notice();self.refresh_hud()
+        if not quiet:self.flash_hud('导航已停止');self.notify('导航已停止')
 
     def worker_error(self,text,map_id=None,generation=0):
         if map_id is not None and ((map_id,generation)!=self.worker.context or map_id!=self.project['map']):return
@@ -1027,8 +1034,8 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         if fix.valid:
             if live:self.hide_game_map()
             self.set_localization(('实时定位' if live else '图片检验')+f' · {fix.confidence:.0%}')
-            if self.hud.data.get('state') in ('lost','bigmap','locating','capture_off'):
-                self.set_hud({'state':'idle','text':'等待导航' if live else '图片检验成功'})
+            self.hud_problem=None
+            if not live:self.flash_hud('图片检验成功')
             heading=f'{fix.heading:.0f}°' if fix.heading is not None else '未知'
             self.fix_detail.setText(f'位置 {fix.x:.1f}, {fix.y:.1f}  ·  匹配点 {fix.inliers}\n误差 {fix.error:.2f}px  ·  朝向 {heading}')
             if live:self.last_accepted=[fix.x,fix.y];self.last_accepted_time=now
@@ -1048,7 +1055,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
                 if data.get('state')=='turnaround':self.next_leg()
                 if data.get('replan'):self.replan_navigation()
                 if data.get('state')=='arrived':self.notify('已到达目的地')
-        self.update_minimap_overlay()
+        self.refresh_hud();self.update_minimap_overlay()
 
     def replan_navigation(self):
         old=self.navigator;waypoints=list(self.project['waypoints'])
@@ -1097,6 +1104,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         if self.big_overlay.isVisible():keep_on_top(self.big_overlay)
         if self.fix_live and time.monotonic()-self.fix_time>2.5:
             self.invalidate_fix('超过 2.5 秒未收到有效实时位置，等待重新定位')
+        self.refresh_hud()
 
     def select_region(self,large=False):
         self.reset_game_map();self.worker.reset_view()
@@ -1170,17 +1178,58 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         self.settings['mode']=self.mode.currentData();self.tts.stop();self.save_settings()
         if self.navigator.active:
             self.navigator.cues=cues_for(self.navigator.route,self.project['notes'],self.settings['mode'],self.project['meters_per_pixel'] or 1);self.navigator.spoken.clear()
-            self.set_hud({'state':'idle','text':'WRC 路书' if self.settings['mode']=='wrc' else '常规导航'})
-        else:self.set_hud({'state':'idle','text':'等待导航'})
+            self.hud_navigation=None
+        self.flash_hud('WRC 路书' if self.settings['mode']=='wrc' else '常规导航')
 
     def set_localization(self,text):
         self.fix_label.setText(text);self.hud.set_localization(text)
 
-    def set_hud(self,data):self.hud.set_data(data,self.settings['mode'],self.project['meters_per_pixel'] is not None)
+    def clear_hud_notice(self):
+        self.hud_notice_timer.stop();self.hud_notice=None
+
+    def expire_hud_notice(self):
+        self.clear_hud_notice();self.refresh_hud()
+
+    def flash_hud(self,text):
+        self.set_hud({'state':'notice','text':text})
+
+    def set_hud(self,data):
+        state=data.get('state','idle')
+        if state=='lost':self.hud_problem=dict(data)
+        elif state=='locating':self.hud_problem=None
+        elif state=='bigmap':pass  # The current view determines its lifetime.
+        elif state in ('navigating','offroute','waiting_road','wrongway','turnaround') and self.navigator.active:
+            self.hud_navigation=dict(data)
+        elif state=='idle' and data.get('text') in (None,'待机中','等待导航'):pass
+        else:
+            if state=='capture_off':self.hud_problem=None
+            self.hud_notice=dict(data);self.hud_notice_timer.start()
+        self.refresh_hud()
+
+    def refresh_hud(self):
+        if not hasattr(self,'hud_notice_timer'):return
+        big=self.game_view_available()
+        recording=self.recorder.active
+        paused=recording and (not self.fix_live or big or bool(self.recorder.error))
+        activity=('路线记录暂停' if paused else '路线记录中') if recording else ''
+        if big:
+            data={'state':'recording_paused','text':activity,'next_text':'回到小地图后继续记录'} if recording and not self.navigator.active else {'state':'bigmap','text':'大地图操作中'}
+        elif self.hud_problem is not None:data=dict(self.hud_problem)
+        elif self.worker.capture and not self.fix_live:data={'state':'locating','text':'等待定位'}
+        elif self.navigator.active:data=dict(self.hud_navigation or {'state':'navigating','text':'导航中'})
+        elif recording:
+            data={'state':'recording_paused' if paused else 'recording','text':activity,
+                  'next_text':'请开启小地图定位' if not self.worker.capture else '点击“结束并加入路网”完成记录'}
+        elif self.pending_start:data={'state':'locating','text':'等待定位'}
+        else:data={'state':'idle','text':'待机中'}
+        if self.hud_notice is not None:
+            if data['state'] in ('idle','bigmap'):data=dict(self.hud_notice)
+            else:data['notice']=self.hud_notice['text']
+        if activity and activity!=data['text']:data['activity']=activity
+        self.hud.set_data(data,self.settings['mode'],self.project['meters_per_pixel'] is not None)
 
     def show_hud(self):
-        if not self.navigator.active:self.set_hud({'state':'idle','text':'等待导航'})
-        self.hud.show()
+        self.refresh_hud();self.hud.show()
 
     def reset_hud(self):
         rect=QApplication.primaryScreen().availableGeometry();self.settings['hud'].update(x=rect.x()+rect.width()//2-200,y=rect.y()+50)
@@ -1267,7 +1316,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         self.record_timer.stop();self.disconnect_recording();self.save_recording()
         self.cursor_timer.stop();self.global_hotkeys.close();self.big_overlay.close()
         self.minimap_overlay.close()
-        self.watchdog.stop();self.autosave.stop();self.tts.close();self.hud.close();self.worker.shutdown();self.save_project();self.save_settings();event.accept()
+        self.hud_notice_timer.stop();self.watchdog.stop();self.autosave.stop();self.tts.close();self.hud.close();self.worker.shutdown();self.save_project();self.save_settings();event.accept()
 
 
 def run():

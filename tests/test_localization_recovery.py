@@ -223,7 +223,7 @@ def test_capture_restart_restores_hud_title_without_navigation(window):
     assert window.hud.data['state']=='locating'
     window.on_fix(good_fix(window.worker),frame,True)
     assert window.fix_live and not window.navigator.active
-    assert window.hud.data['text']=='等待导航'
+    assert window.hud.data['text']=='待机中'
     assert window.hud.localization_text==window.fix_label.text()=='实时定位 · 100%'
 
 

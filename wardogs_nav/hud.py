@@ -47,7 +47,7 @@ class Hud(QWidget):
     def __init__(self, settings):
         super().__init__()
         self.settings=settings
-        self.data={'text':'等待定位','state':'idle'}
+        self.data={'text':'待机中','state':'idle'}
         self.localization_text='尚未定位'
         self.mode='normal'
         self.drag=None
@@ -68,7 +68,7 @@ class Hud(QWidget):
             self.show()
 
     def set_data(self,data,mode='normal',calibrated=True):
-        self.data=data or {'text':'等待路线','state':'idle'}
+        self.data=data or {'text':'待机中','state':'idle'}
         self.mode=mode
         self.calibrated=calibrated
         self.update()
@@ -112,7 +112,7 @@ class Hud(QWidget):
         draw_symbol(p,QRectF(14,47,82,85),'straight' if self.data.get('text')=='沿当前道路行驶' else kind,color)
         p.setPen(QColor('#a3b4b7'));p.setFont(QFont('Microsoft YaHei UI',9))
         p.drawText(QRectF(20,10,w-35,26),Qt.AlignLeft|Qt.AlignVCenter,'WARDOGS  /  '+('WRC 路书' if self.mode=='wrc' else '地面导航')+'   '+self.data.get('leg',''))
-        text=self.data.get('text','等待定位')
+        text=self.data.get('text','待机中')
         if cue and self.mode=='wrc' and kind in ('left','right'):
             text=('左' if kind=='left' else '右')+f' {cue.grade}'
         p.setFont(QFont('Microsoft YaHei UI',23 if len(text)<10 else 13,QFont.Bold))
@@ -130,10 +130,14 @@ class Hud(QWidget):
         p.setFont(QFont('Microsoft YaHei UI',9));p.setPen(QColor('#a3b4b7'))
         p.drawText(QRectF(110,115,w-125,24),Qt.AlignLeft,self.localization_text)
         p.setFont(QFont('Microsoft YaHei UI',8));p.setPen(QColor('#9da8ab'))
-        footer=self.data.get('next_text','按规划道路行驶') if self.mode=='normal' else '路书 · 1 慢弯 — 6 快弯'
-        if not self.settings.get('locked'):
-            footer+='  ·  可拖动'
-        p.drawText(QRectF(20,142,w-35,22),Qt.AlignLeft,footer)
+        footer=self.data.get('next_text','按规划道路行驶' if self.data.get('state')=='navigating' else '')
+        footer=self.status_footer(footer)
+        p.drawText(QRectF(20,142,w-35,22),Qt.AlignLeft,p.fontMetrics().elidedText(footer,Qt.ElideRight,int(w-35)))
+
+    def status_footer(self,detail):
+        parts=[self.data.get('activity',''),self.data.get('notice',''),detail]
+        if not self.settings.get('locked'):parts.append('可拖动')
+        return '  ·  '.join(part for part in parts if part)
 
     def paint_roadbook(self,p,w):
         p.setFont(QFont('Microsoft YaHei UI',9));p.setPen(QColor('#e8c570'))
@@ -160,6 +164,6 @@ class Hud(QWidget):
             p.drawText(QRectF(x+5,116,width-10,17),Qt.AlignCenter,p.fontMetrics().elidedText(detail,Qt.ElideRight,int(width-10)))
         p.setFont(QFont('Microsoft YaHei UI',8));p.setPen(QColor('#a4b0b3'))
         remaining=self.data.get('remaining',0)
-        footer=f'1 慢弯 · 6 快弯    剩余 {remaining/1000:.2f} km' if unit=='m' else f'1 慢弯 · 6 快弯    剩余 {remaining:.0f} 单位'
-        if not self.settings.get('locked'):footer+='  ·  可拖动'
-        p.drawText(QRectF(16,143,w-32,20),Qt.AlignLeft,footer)
+        footer=f'剩余 {remaining/1000:.2f} km' if unit=='m' else f'剩余 {remaining:.0f} 单位'
+        footer=self.status_footer(footer+'  ·  1 慢弯 — 6 快弯')
+        p.drawText(QRectF(16,143,w-32,20),Qt.AlignLeft,p.fontMetrics().elidedText(footer,Qt.ElideRight,int(w-32)))

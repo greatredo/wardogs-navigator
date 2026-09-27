@@ -52,7 +52,7 @@ def default_settings():
             'recording_auto': False, 'recording_minimum': 3,
             'wrc_lead_m': 150., 'wrc_lead_s': 5., 'wrc_chain_m': 60.,
             'main_topmost': False,
-            'bigmap': {'enabled': False, 'coordinates': True, 'opacity': .9, 'line_width': 4, 'avoid_radius_m': 50},
+            'bigmap': {'enabled': False, 'coordinates': True, 'show_roads': False, 'opacity': .9, 'line_width': 4, 'avoid_radius_m': 50},
             'bigmap_capture': {'left': 0, 'top': 0, 'width': 800, 'height': 800},
             'bigmap_hotkeys': dict(DEFAULT_HOTKEYS),
             'minimap_overlay': {'enabled': True, 'opacity': .85, 'line_width': 4},

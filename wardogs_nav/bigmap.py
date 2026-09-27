@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QWidget
 from .overlay import native_windows,keep_on_top,exclude_from_capture
 from .routing import remaining_points
 from .model import NOTE_TYPES
+from .mapview import COLORS
 
 
 class BigMapOverlay(QWidget):
@@ -22,14 +23,15 @@ class BigMapOverlay(QWidget):
         image=QImage(w,h,QImage.Format_RGBA8888);image.fill(Qt.transparent)
         p=QPainter(image);p.setRenderHint(QPainter.Antialiasing);p.setFont(QFont('Microsoft YaHei UI',10))
 
-        def path(points,color,width):
+        def path(points,color,width,style=Qt.SolidLine):
             points=view.project(points)
             if len(points)<2:return
             curve=QPainterPath(QPointF(*points[0]))
             for xy in points[1:]:curve.lineTo(*xy)
             p.setBrush(Qt.NoBrush)
-            p.setPen(QPen(QColor(8,25,27,color.alpha()),width+2,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(curve)
-            p.setPen(QPen(color,width,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(curve)
+            if style==Qt.SolidLine:
+                p.setPen(QPen(QColor(8,25,27,color.alpha()),width+2,Qt.SolidLine,Qt.RoundCap,Qt.RoundJoin));p.drawPath(curve)
+            p.setPen(QPen(color,width,style,Qt.RoundCap,Qt.RoundJoin));p.drawPath(curve)
 
         def marker(point,label,color,radius=6):
             if point is None:return
@@ -39,6 +41,10 @@ class BigMapOverlay(QWidget):
             p.setPen(QColor('#101d26'));p.drawText(QPointF(x+10,y+1),label)
             p.setPen(QColor(color));p.drawText(QPointF(x+9,y),label)
 
+        if self.settings.get('show_roads',False):
+            for road in project['roads']:
+                color=QColor(COLORS[road['kind']]);color.setAlpha(155)
+                path(road['points'],color,2,Qt.DashLine)
         for zone in project['avoid']:
             x,y=zone['point']
             if zone.get('shape')=='rect':
