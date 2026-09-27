@@ -100,7 +100,7 @@ def test_service_falls_back_after_child_crash_and_remembers_failed_voice(app, tm
     service.status.connect(status.append)
     try:
         for generation in range(2):
-            assert service.synthesize('路口右转', 'zh-CN', '', 0, tmp_path/f'{generation}.wav', generation)
+            assert service.synthesize('前方250米，路口右转', 'zh-CN', '', 0, tmp_path/f'{generation}.wav', generation)
             wait_for(app, lambda: len(ready) == generation + 1 and not service.busy)
             assert ready[-1][1:] == (generation, 'local')
         assert not errors and len(made) == 1
@@ -117,7 +117,7 @@ def test_local_mode_never_constructs_a_system_voice_host(app, tmp_path):
     results = []
     service.ready.connect(lambda *args: results.append(args))
     try:
-        service.synthesize('路口左转', 'zh-CN', '', 0, tmp_path/'local.wav', 1, 'local')
+        service.synthesize('前方2.5公里，路口左转', 'zh-CN', '', 0, tmp_path/'local.wav', 1, 'local')
         wait_for(app, lambda: bool(results))
         assert results[0][2] == 'local'
     finally:
