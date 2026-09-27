@@ -33,6 +33,22 @@ def run_selftest(output):
         report['checks']['image_localization']=True
         view=locator.locate_map(sample)
         report['checks']['bigmap_localization']=bool(view.valid and np.linalg.norm(view.matrix@[sample.shape[1]/2,sample.shape[0]/2,1]-[fix.x,fix.y])<2)
+        from .coordinates import game_to_map,map_to_game
+        from .coordinate_reader import CoordinateReader
+        coordinate=game_to_map('bakurani',[87.02,33.58])
+        report['checks']['game_coordinate_assets']=bool(np.linalg.norm(np.asarray(coordinate)-[1181.98,1783.46])<.1
+            and np.allclose(map_to_game('bakurani',coordinate),[87.02,33.58]))
+        labels=np.full((400,600,3),25,np.uint8)
+        cv2.line(labels,(200,5),(200,395),(145,145,145));cv2.line(labels,(5,240),(595,240),(145,145,145))
+        cv2.putText(labels,'y33.58',(210,150),cv2.FONT_HERSHEY_SIMPLEX,.65,(255,255,255),1,cv2.LINE_AA)
+        cv2.putText(labels,'x87.18',(250,232),cv2.FONT_HERSHEY_SIMPLEX,.65,(255,255,255),1,cv2.LINE_AA)
+        reader=CoordinateReader()
+        try:
+            reader.read(labels,'bakurani',0);coordinate_fix=reader.read(labels,'bakurani',0)
+            report['checks']['native_coordinate_ocr']=bool(coordinate_fix and coordinate_fix.game==[87.18,33.58]
+                and coordinate_fix.matches((200,240),dict(left=0,top=0)))
+            report['coordinate_ocr_error']=reader.error
+        finally:reader.cleanup()
         terrain=read_image(map_asset('ozeti','image'))
         ambiguous=cv2.resize(terrain[1177:1313,437:573],(340,340))
         ambiguous[148:193,148:193]=(70,70,70)

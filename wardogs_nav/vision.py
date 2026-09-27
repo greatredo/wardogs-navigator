@@ -47,6 +47,7 @@ class MapViewFix:
     captured_at: float = 0
     region: object = None
     foreground: int = 0
+    coordinate: object = None
 
     def screen_to_map(self, point):
         if not self.valid or self.matrix is None or not self.region:return None

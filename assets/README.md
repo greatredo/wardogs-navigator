@@ -10,6 +10,8 @@
 
 OZETI 的固定坐标变换保存在 `map-source.json`；另两张图的裁剪范围、比例尺和诊断样例中心保存在各自的 `source.json`。`legacy-road-seed.json` 用于识别并迁移早期默认路网，不包含用户配置。
 
+`game-coordinates.json` 保存游戏 x/y 到当前底图像素的仿射变换，沿用上述上游地图的 `bounds`、`tileBounds` 和 100 米/坐标单位。先按 z5 的 8192 像素全图范围换算并减去现有裁切原点，再应用各图 `reference_to_map`；游戏 y 向北增加，底图像素 y 向下增加。坐标输入不改变用户路网、比例尺或项目存储格式。BAKURANI 已用游戏十字坐标与地形匹配交叉核对；另两张图沿用各自源数据变换。
+
 ## 来源与许可范围
 
 公开地图配置来自 [apollyon-sys/wardogs-calculator](https://github.com/apollyon-sys/wardogs-calculator)，上游为 MIT 许可，Copyright (c) 2026 Apollyon，完整许可保留在 [wardogs-calculator-LICENSE.txt](wardogs-calculator-LICENSE.txt)。瓦片来自该项目公开的 `assets-v1` 数据集，具体地址记录在来源 JSON 中。
