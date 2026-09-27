@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "description": "Game x/y to existing navigation map pixels, composed from z5 tile cropping and reference_to_map registration.",
+  "maps": {
+    "ozeti": {
+      "bounds": {
+        "minX": 57.58,
+        "maxX": 143.07,
+        "minY": 21.81,
+        "maxY": 99.56
+      },
+      "game_to_map": [
+        [
+          18.665980556956693,
+          0.0014754954839158875,
+          -1076.7271983111136
+        ],
+        [
+          0.0014754954839158875,
+          -18.665980556956693,
+          1859.7560981758202
+        ]
+      ],
+      "meters_per_coordinate_unit": 100,
+      "source": "https://github.com/apollyon-sys/wardogs-calculator/blob/main/maps/ozeti.json"
+    },
+    "bakurani": {
+      "bounds": {
+        "minX": 23.35,
+        "maxX": 133.6,
+        "minY": 19.34,
+        "maxY": 129.65
+      },
+      "game_to_map": [
+        [
+          18.564176939811457,
+          0.0,
+          -433.47353154459756
+        ],
+        [
+          0.0,
+          -18.564176939811457,
+          2406.845540246556
+        ]
+      ],
+      "meters_per_coordinate_unit": 100,
+      "source": "https://github.com/apollyon-sys/wardogs-calculator/blob/main/maps/bakurani.json"
+    },
+    "zestafona": {
+      "bounds": {
+        "minX": 19.9,
+        "maxX": 124.89,
+        "minY": 50.7,
+        "maxY": 141.9
+      },
+      "game_to_map": [
+        [
+          19.504761904761907,
+          0.0,
+          -387.9497142857143
+        ],
+        [
+          0.0,
+          -19.504761904761907,
+          2767.9207619047625
+        ]
+      ],
+      "meters_per_coordinate_unit": 100,
+      "source": "https://github.com/apollyon-sys/wardogs-calculator/blob/main/maps/zestafona.json"
+    }
+  }
+}

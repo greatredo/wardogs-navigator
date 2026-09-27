@@ -28,6 +28,7 @@ from .overlay import MinimapOverlay,keep_on_top
 from .game_map import GameMapController
 from .widgets import protect_settings_wheel
 from .recording_ui import RecordingController
+from .coordinates import format_coordinates,map_to_game
 
 STYLE='''
 QWidget { background:#151d25; color:#e5ecee; font:10pt "Microsoft YaHei UI"; }
@@ -205,9 +206,9 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         self.map.road_selected.connect(self.select_road_on_map)
         self.map.road_edit_requested.connect(self.edit_road_on_map)
         self.map.road_delete_requested.connect(self.delete_road_on_map)
-        self.map.hover.connect(lambda x,y:self.coordinate_label.setText(f'地图坐标  {x:.0f}, {y:.0f}'))
+        self.map.hover.connect(self.show_map_coordinates)
         bottom=QHBoxLayout();legend=self.text('┄ 大路   ┄ 小路   ┄ 野地   ━ 导航路线',True);legend.setWordWrap(False);bottom.addWidget(legend);bottom.addStretch()
-        self.coordinate_label=self.text('地图坐标 —',True);self.coordinate_label.setWordWrap(False);bottom.addWidget(self.coordinate_label);right_layout.addLayout(bottom)
+        self.coordinate_label=self.text('游戏坐标 —',True);self.coordinate_label.setWordWrap(False);bottom.addWidget(self.coordinate_label);right_layout.addLayout(bottom)
         splitter.addWidget(right);splitter.setSizes([390,1050]);splitter.setStretchFactor(1,1)
         self.build_navigation();self.build_editor();self.build_library();self.build_settings()
         self.statusBar().showMessage('初始化视觉定位…')
@@ -239,6 +240,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         arrival=QFormLayout();self.arrival_radius=number(self.settings['arrival_m'],5,1000)
         self.arrival_radius.valueChanged.connect(lambda v:self.set_setting('arrival_m',v));arrival.addRow('到达范围 (m)',self.arrival_radius);target.addLayout(arrival)
         target.addWidget(self.text('进入目标点范围并连续定位确认后即算到达，去程与返程都生效。未标定比例时按地图单位计算。',True))
+        self.build_coordinate_input(layout)
         rules=self.group('道路偏好',layout);self.kind_preferences={};rf=QFormLayout()
         for key,label in KINDS.items():
             choice=QComboBox()
@@ -394,7 +396,8 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         self.sync_policy();self.refresh_lists();self.refresh_map();self.update_scale_label()
         self.preview.clear();self.preview.setText('开启定位后显示当前地图的小地图预览')
         self.set_localization('尚未定位');self.fix_detail.setText('已切换地图，正在准备对应的定位特征。')
-        self.route_label.setText('路线尚未规划');self.coordinate_label.setText('地图坐标 —')
+        self.route_label.setText('路线尚未规划');self.coordinate_label.setText('游戏坐标 —')
+        self.coordinate_input.clear();self.coordinate_feedback.setText('已切换地图，请输入当前地图的游戏坐标。')
         name=map_info(map_id)['name'];self.setWindowTitle('WARDOGS Navigator '+__version__+' · '+name)
         self.save_settings();self.notify(f'已切换到 {name}；道路、收藏和路书已载入。开启定位后重新开始导航。')
         return True
@@ -458,7 +461,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
             size=f"{z['width']*scale:.0f} × {z['height']*scale:.0f}" if z.get('shape')=='rect' else f"半径 {z['radius']*scale:.0f}"
             self.avoid_list.addItem(f"危险区 {i+1} · {size} {'m' if self.project['meters_per_pixel'] else '单位'}")
         self.waypoint_list.clear()
-        for i,p in enumerate(self.project['waypoints']):self.waypoint_list.addItem(f'{i+1:02}  途经 {p[0]:.0f}, {p[1]:.0f}')
+        for i,p in enumerate(self.project['waypoints']):self.waypoint_list.addItem(f'{i+1:02}  途经 '+format_coordinates(map_to_game(self.project['map'],p)))
         self.waypoint_list.setVisible(bool(self.project['waypoints']))
         for button in self.clear_waypoint_buttons:button.setEnabled(bool(self.project['waypoints']))
         for button in self.clear_avoid_buttons:button.setEnabled(bool(self.project['avoid']))
@@ -466,9 +469,9 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         for d in self.project['destinations']:self.saved_dest.addItem(d['name'])
         self.saved_dest.blockSignals(False)
         start=self.project['start']
-        self.start_label.setText(f'起始点 / 返程终点  {start[0]:.0f}, {start[1]:.0f}' if start else '起始点未设置 · 开始导航时使用当前位置')
+        self.start_label.setText('起始点 / 返程终点  '+format_coordinates(map_to_game(self.project['map'],start)) if start else '起始点未设置 · 开始导航时使用当前位置')
         d=self.project['destination'];label='去程终点' if self.project['roundtrip'] else '终点'
-        self.destination_label.setText(f'{label}  {d[0]:.0f}, {d[1]:.0f}' if d else '在地图点选目的地')
+        self.destination_label.setText(label+'  '+format_coordinates(map_to_game(self.project['map'],d)) if d else '在地图点选目的地')
         selected=self.favorite_list.currentRow();self.favorite_list.clear()
         for saved in self.project['route_library']:
             active='▶ ' if saved['id']==self.project.get('active_route_id') else ''
@@ -987,7 +990,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
         self.capture_button.setText('关闭定位' if self.worker.capture else '开启定位')
         self.fix_detail.setText(reason)
         self.navigator.lost();self.tts.stop();self.set_hud({'state':'lost','text':'定位丢失'})
-        if self.big_view_available():
+        if self.game_view_available():
             self.set_localization(self.big_localization())
             self.set_hud({'state':'bigmap','text':'大地图操作中'})
         else:self.set_localization('定位丢失 · 已暂停播报')
@@ -1083,7 +1086,7 @@ class MainWindow(QMainWindow,GameMapController,RecordingController):
             self.tts.stop();self.set_hud({'state':'waiting_road','text':'请返回道路'});self.notify('已保留下一程，返回可用道路后继续')
 
     def check_stale(self):
-        if self.big_view is not None:
+        if self.big_view is not None or self.coordinate_view is not None:
             if not self.game_map_active():self.hide_game_map()
             elif not self.big_view_fresh():
                 self.set_localization(self.big_localization());self.update_big_overlay()
