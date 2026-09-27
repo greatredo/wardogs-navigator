@@ -5,6 +5,7 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 from .vision import Locator, read_image, Fix, MapViewFix
 from .hotkeys import foreground_window
+from .coordinate_reader import CoordinateReader
 
 
 class CaptureWorker(QThread):
@@ -28,6 +29,7 @@ class CaptureWorker(QThread):
         self.target_window=0
         self.context=(settings.get('map_id','ozeti'),0)
         self.wake=threading.Event()
+        self.coordinates=CoordinateReader()
 
     def request_map(self,map_id):
         self.reset_view()
@@ -96,7 +98,7 @@ class CaptureWorker(QThread):
             if locator is not None and (sample or live):
                 session=self.session
                 if view_session!=session:
-                    locator.map_reference=None;view_session=session
+                    locator.map_reference=None;view_session=session;self.coordinates.reset()
                 actions=self.take_actions()
                 frame=None
                 try:
@@ -131,6 +133,7 @@ class CaptureWorker(QThread):
                 self.result.emit(fix,frame,live)
                 if live and fix.valid:
                     locator.map_reference=None
+                    self.coordinates.reset()
                     if actions:self.action_failed.emit('已返回小地图，未完成的大地图操作已取消')
                     # No big-map capture, matching, foreground or cursor queries.
                 elif live and self.settings.get('bigmap',{}).get('enabled'):
@@ -148,27 +151,35 @@ class CaptureWorker(QThread):
                                 grabber=mss.MSS()
                             big_frame=np.asarray(grabber.grab(region))[:,:,:3].copy()
                             view=locator.locate_map(big_frame,self.map_mask)
-                            if foreground_window()!=foreground:view.valid=False;view.reason='前台窗口已切换'
+                            if not view.valid and self.settings['bigmap'].get('coordinates',True):
+                                view.coordinate=self.coordinates.read(big_frame,context[0],(context,session,foreground,tuple(region.values())))
+                                if self.coordinates.error:view.reason=self.coordinates.error
+                            else:self.coordinates.reset()
+                            if foreground_window()!=foreground:
+                                view.valid=False;view.coordinate=None;view.reason='前台窗口已切换'
                     except Exception as error:
                         view=MapViewFix(reason=f'大地图截图或识别失败：{error}')
                     if context!=self.context or session!=self.session or not self.capture:continue
                     if region!=self.settings['bigmap_capture'] or not self.settings['bigmap']['enabled']:continue
                     view.map_id,view.generation=context
                     view.session=session;view.captured_at=captured;view.region=region;view.foreground=foreground
-                    self.mode='big' if view.valid else 'lost'
+                    self.mode='big' if view.valid or view.coordinate else 'lost'
                     # Retain quick consecutive presses and retry transient failures.
                     pending=[a for a in actions if a[0]==session and a[3]==foreground and captured-a[4]<6]
                     if len(pending)<len(actions):self.action_failed.emit('大地图操作超时或窗口已切换，请重试')
-                    if not view.valid:
+                    if not view.valid and not view.coordinate:
                         self.retry_actions(pending,foreground);pending=[]
                     self.map_result.emit(view,big_frame,pending)
             self.wake.wait(.2 if self.mode=='big' else max(.2,self.settings['interval_ms']/1000))
             self.wake.clear()
         if grabber:
             grabber.close()
+        self.coordinates.cleanup()
 
     def shutdown(self):
         self.capture=False
         self.requestInterruption()
+        self.coordinates.close()
         self.wake.set()
         self.wait()
+        self.coordinates.cleanup()
