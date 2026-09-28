@@ -2,7 +2,7 @@
 from copy import deepcopy
 import math
 from .model import uid
-from .routing import distance,project,cumulative,nearest_on_route,bridge_ports
+from .routing import distance,project,cumulative,nearest_on_route,bridge_ports,roads_connect,point_at
 
 
 def simplify(points,tolerance):
@@ -40,6 +40,7 @@ class SegmentIndex:
     def covering(self,a,b,tolerance=1.5):
         mid=[(a[k]+b[k])/2 for k in (0,1)];options=[]
         for c,d,road in self.near(a,b,tolerance):
+            if road.get('bridge'):continue
             length=distance(a,b)*distance(c,d)
             if length<1e-8:continue
             aligned=abs(sum((b[k]-a[k])*(d[k]-c[k]) for k in (0,1)))/length
@@ -58,15 +59,184 @@ def intersection(a,b,c,d):
         return max(0.,min(1.,t)),[a[k]+t*u[k] for k in (0,1)]
 
 
-def add_recorded_roads(roads,traces,scale=1.,source='manual'):
+def path_part(points,start,end):
+    lengths=cumulative(points)
+    return clean_points([point_at(points,lengths,start),
+                         *(p for p,s in zip(points,lengths) if start+1e-7<s<end-1e-7),
+                         point_at(points,lengths,end)])
+
+
+def clean_points(points):
+    result=[]
+    for p in points:
+        if not result or distance(result[-1],p)>1e-7:result.append(list(p))
+    return result
+
+
+def road_match(points,road,tolerance,scale):
+    """Equal-distance samples make the mean independent of localization cadence."""
+    if road.get('bridge'):return None
+    lengths=cumulative(points);length=lengths[-1]
+    if length<1e-7:return None
+    n=max(2,math.ceil(length*scale/5.))
+    samples=[point_at(points,lengths,length*i/n) for i in range(n+1)]
+    positions=[nearest_on_route(p,road['points']) for p in samples]
+    mean=(sum(p[0] for p in positions)-(positions[0][0]+positions[-1][0])/2)/n
+    progress=[p[1] for p in positions];span=progress[-1]-progress[0]
+    direction=1 if span>=0 else -1
+    # A nearby perpendicular crossing or a projection jumping round a loop is
+    # not a matching road, even when its mean distance is small.
+    a,b=samples[0],samples[-1];c,d=positions[0][3],positions[-1][3]
+    aligned=sum((b[k]-a[k])*(d[k]-c[k]) for k in (0,1))/max(distance(a,b)*distance(c,d),1e-9)
+    if mean>tolerance or abs(span)<.2*length or aligned<.5:return None
+    if any((b-a)*direction<-.05 for a,b in zip(progress,progress[1:])):return None
+    # Check the matching original span too: close endpoints must not erase a
+    # long detour whose middle actually lies far outside the fitting distance.
+    original=path_part(road['points'],min(progress[0],progress[-1]),max(progress[0],progress[-1]))
+    old_lengths=cumulative(original);n=max(2,math.ceil(old_lengths[-1]*scale/5.))
+    gaps=[nearest_on_route(point_at(original,old_lengths,old_lengths[-1]*i/n),points)[0] for i in range(n+1)]
+    mean=max(mean,(sum(gaps)-(gaps[0]+gaps[-1])/2)/n)
+    return (mean,progress[0],progress[-1]) if mean<=tolerance else None
+
+
+def fit_sections(trace,index,tolerance,scale):
+    lengths=cumulative(trace);total=lengths[-1]
+    if total<1e-7:return
+    cuts={0.,total};step=30./scale
+    cuts.update(i*step for i in range(1,math.ceil(total/step)))
+    # Existing road ends delimit overlap: do not discard a genuinely new tail.
+    for offset,(a,b) in enumerate(zip(trace,trace[1:])):
+        seen=set()
+        for _,_,road in index.near(a,b,tolerance):
+            if road.get('bridge') or road['id'] in seen:continue
+            seen.add(road['id'])
+            for endpoint in (road['points'][0],road['points'][-1]):
+                gap,_,fraction=project(endpoint,a,b)
+                if gap<=tolerance:cuts.add(lengths[offset]+distance(a,b)*fraction)
+    ordered=sorted(cuts)
+    for start,end in zip(ordered,ordered[1:]):
+        if end-start>1e-7:yield path_part(trace,start,end)
+
+
+def connection_positions(road,index):
+    """Keep every existing junction fixed when replacing a matched shape."""
+    points=road['points'];lengths=cumulative(points);pins={0.,lengths[-1]}
+    for i,(a,b) in enumerate(zip(points,points[1:])):
+        for c,d,other in index.near(a,b):
+            if other is road:continue
+            for p in (c,d):
+                gap,q,t=project(p,a,b)
+                if gap<1.5 and roads_connect(road,other,p):pins.add(lengths[i]+t*distance(a,b))
+            for p,at in ((a,lengths[i]),(b,lengths[i+1])):
+                if project(p,c,d)[0]<1.5 and roads_connect(road,other,p):pins.add(at)
+    return pins
+
+
+def ground_crossings(points,road,index):
+    result=[]
+    for a,b in zip(points,points[1:]):
+        cuts={0.:a,1.:b}
+        for c,d,other in index.near(a,b):
+            if other is road:continue
+            hit=intersection(a,b,c,d)
+            if hit and (not other.get('bridge') or any(distance(hit[1],p)<1.5 for p in bridge_ports(other))):
+                cuts[hit[0]]=hit[1]
+        result.extend(p for _,p in sorted(cuts.items()))
+    return clean_points(result)
+
+
+def fit_road_part(road,trace,index,tolerance,scale,merge):
+    match=road_match(trace,road,tolerance,scale)
+    if match is None:return trace,False
+    _,start,end=match;reverse=start>end
+    if reverse:start,end=end,start;trace=list(reversed(trace))
+    old=road['points'];lengths=cumulative(old)
+    chosen=path_part(old,start,end);changed=False
+    if merge:
+        pins=sorted({start,end}|{p for p in connection_positions(road,index) if start<p<end})
+        pieces=[]
+        for a,b in zip(pins,pins[1:]):
+            original=path_part(old,a,b)
+            pa=nearest_on_route(original[0],trace);pb=nearest_on_route(original[-1],trace)
+            candidate=clean_points([original[0],*path_part(trace,pa[1],pb[1]),original[-1]]) if pb[1]>pa[1] else original
+            if cumulative(candidate)[-1]+1e-5<cumulative(original)[-1]:
+                pieces.extend(ground_crossings(candidate,road,index));changed=True
+            else:pieces.extend(original)
+        chosen=clean_points(pieces)
+        replacement=clean_points([*path_part(old,0,start),*chosen,*path_part(old,end,lengths[-1])])
+        if changed and len(replacement)<=2000:road['points']=replacement
+        else:changed=False;chosen=path_part(old,start,end)
+    return (list(reversed(chosen)) if reverse else chosen),changed
+
+
+def joined_traces(traces):
+    """Join adjacent automatic sample blocks without choosing across a fork."""
+    paths=[clean_points(p) for p in traces if len(p)>1];ends={}
+    key=lambda p:tuple(round(x,5) for x in p)
+    for i,points in enumerate(paths):
+        for side in (0,-1):ends.setdefault(key(points[side]),[]).append((i,side))
+    remaining=set(range(len(paths)));result=[]
+    while remaining:
+        i=min(remaining);remaining.remove(i);path=paths[i]
+        for side in (0,-1):
+            while len(ends.get(key(path[side]),[]))==2:
+                choices=[(j,k) for j,k in ends[key(path[side])] if j in remaining]
+                if len(choices)!=1:break
+                j,k=choices[0];remaining.remove(j)
+                other=paths[j] if k!=side else list(reversed(paths[j]))
+                path=other[:-1]+path if side==0 else path+other[1:]
+        result.append(path)
+    return result
+
+
+def fit_recorded_traces(roads,traces,scale,tolerance,merge):
+    """Fit only local matching spans; retain off-road detours and connections."""
+    index=SegmentIndex(roads);result=[];updated=set()
+    for trace in traces:
+        if len(trace)<2:continue
+        output=[];pending=[];selected=None;direction=None
+        def flush():
+            nonlocal pending,selected,direction,index
+            if not pending:return
+            fitted,changed=fit_road_part(selected,pending,index,tolerance,scale,merge) if selected else (pending,False)
+            output.extend(fitted)
+            if changed:updated.add(selected['id']);index=SegmentIndex(roads)
+            pending=[];selected=None;direction=None
+        for section in fit_sections(trace,index,tolerance,scale):
+            nearby={r['id']:r for a,b in zip(section,section[1:]) for _,_,r in index.near(a,b,tolerance)}
+            candidates=[]
+            for road in nearby.values():
+                match=road_match(section,road,tolerance,scale)
+                if match:candidates.append((match,road))
+            match,road=min(candidates,key=lambda item:item[0][0]) if candidates else (None,None)
+            if selected:
+                previous=next(((m,r) for m,r in candidates if r is selected),None)
+                if previous and previous[0][0]<=match[0]+tolerance*.1:match,road=previous
+            heading=(1 if match[2]>match[1] else -1) if match else None
+            if road is not selected or heading!=direction:flush()
+            selected=road;direction=heading;pending=clean_points([*pending,*section])
+        flush()
+        result.append(clean_points(output))
+    return result,updated
+
+
+def add_recorded_roads(roads,traces,scale=1.,source='manual',*,snap_to_roads=False,snap_distance_m=30.,merge_shortest=False):
     """Skip covered spans, split actual ground intersections, retain bridge levels."""
-    result=deepcopy(roads);index=SegmentIndex(result);added=[]
+    result=deepcopy(roads);updated=set()
+    if snap_to_roads:
+        if source=='auto':traces=joined_traces(traces)
+        traces,updated=fit_recorded_traces(result,traces,scale,max(1.,snap_distance_m)/scale,merge_shortest)
+    index=SegmentIndex(result);added=[]
     minimum=max(1.5,8/scale)
     for trace in traces:
         run=[];previous=None
         def flush():
             nonlocal run
-            if len(run)>1 and cumulative(run)[-1]>=minimum:
+            def on_ground(point):
+                return any(not r.get('bridge') and project(point,a,b)[0]<1.5 for a,b,r in index.near(point,point))
+            connection=(snap_to_roads and len(run)>1 and distance(run[0],run[-1])>=1.5 and
+                        on_ground(run[0]) and on_ground(run[-1]))
+            if len(run)>1 and (cumulative(run)[-1]>=minimum or connection):
                 points=simplify(run,max(.3,2/scale))
                 for offset in range(0,len(points)-1,1999):
                     road=dict(id=uid(),name=('自动记录' if source=='auto' else '行驶记录')+' · 越野',
@@ -123,7 +293,7 @@ def add_recorded_roads(roads,traces,scale=1.,source='manual'):
                         if merging:break
                     if merging:break
                 if merging:break
-    return result,len(added)
+    return result,len(set(added)|updated)
 
 
 class RoadRecorder:
@@ -132,7 +302,7 @@ class RoadRecorder:
         self.state.setdefault('manual',[]);self.state.setdefault('active',False);self.state.setdefault('units',[])
         self.last=None;self.last_time=None;self.current=None;self.seed=[];self.tail=None
         self.votes={};self.unit_index=SegmentIndex(self.state['units']);self.roads=[];self.road_index=SegmentIndex()
-        self.error='';self.dirty=False
+        self.error='';self.dirty=False;self.merge_shortest=False
 
     @property
     def active(self):return self.state['active']
@@ -207,7 +377,7 @@ class RoadRecorder:
                 unit['count']=min(100,unit['count']+1);start=pb[1];self.dirty=True
             self.votes[unit['id']]=(direction,start,pb[1])
             covered=pb[3]
-        road=self.road_index.covering(a,b)
+        road=None if self.merge_shortest else self.road_index.covering(a,b)
         if covered is not None or road:
             self._seed_done();self.tail=list(covered if covered is not None else project(b,road[2],road[3])[1]);return
         if not self.seed:self.seed=[self.tail or list(a)]
@@ -217,6 +387,21 @@ class RoadRecorder:
 
     def ready(self,minimum):
         return [u for u in self.state['units'] if not u['added'] and u['count']>=minimum]
+
+    def promotion_traces(self,units,minimum):
+        selected={u['id']:u for u in units};frontier=list(units)
+        if self.merge_shortest:
+            # A promoted block can end halfway round a bend. Include two already
+            # qualified neighbours so the comparison uses a continuous drive.
+            for _ in range(2):
+                extra={}
+                for unit in frontier:
+                    for p in (unit['points'][0],unit['points'][-1]):
+                        for _,_,other in self.unit_index.near(p,p):
+                            if other['id'] in selected or other['count']<minimum:continue
+                            if min(distance(p,q) for q in (other['points'][0],other['points'][-1]))<1e-5:extra[other['id']]=other
+                selected.update(extra);frontier=list(extra.values())
+        return [u['points'] for u in selected.values()]
 
     def promoted(self,units):
         for unit in units:unit['added']=True

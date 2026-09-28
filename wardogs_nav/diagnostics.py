@@ -162,6 +162,16 @@ def run_selftest(output):
             for i,x in enumerate(xs):recorder.feed([x,100],pass_index*100+i*.5,True)
             recorder.disconnect()
         report['checks']['recording_independent_passes']=len(recorder.ready(3))>=3
+        near=dict(id='fit-road',name='贴合道路',kind='minor',confirmed=True,points=[[0,100],[100,100]])
+        fitted,fit_count=add_recorded_roads([near],[[[0,108],[100,108]]],snap_to_roads=True,snap_distance_m=10)
+        report['checks']['recording_average_fit']=fit_count==0 and fitted==[near]
+        bent=dict(near,points=[[0,100],[25,108],[50,100],[75,108],[100,100]])
+        merged,merge_count=add_recorded_roads([bent],[[[0,100],[100,100]]],snap_to_roads=True,snap_distance_m=10,merge_shortest=True)
+        from .routing import cumulative
+        report['checks']['recording_shortest_merge']=merge_count==1 and len(merged)==1 and merged[0]['id']==bent['id'] and cumulative(merged[0]['points'])[-1]<cumulative(bent['points'])[-1]
+        window.record_merge.setChecked(True);window.record_snap.setChecked(False)
+        report['checks']['recording_merge_requires_fit']=not window.record_merge.isEnabled() and not window.record_merge.isChecked() and not window.settings['recording_merge_shortest']
+        window.record_snap.setChecked(True)
         from PySide6.QtCore import QPoint,Qt
         from PySide6.QtGui import QWheelEvent
         spin=window.record_minimum;before=spin.value();spin.setFocus();pos=spin.rect().center()
