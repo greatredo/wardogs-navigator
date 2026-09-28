@@ -49,7 +49,8 @@ def test_start_button_waits_for_valid_fix_then_places_start_once(window,monkeypa
     window.begin_navigation()
     assert window.project['start']==[100,100] and window.route.points[0]==(400,100)
     assert window.full_route.points[0]==(100,100)
-    assert '100, 100' in window.start_label.text()
+    from wardogs_nav.coordinates import format_coordinates,map_to_game
+    assert format_coordinates(map_to_game(window.project['map'],[100,100])) in window.start_label.text()
 
 
 def test_map_set_drag_and_current_position_controls(window,app):

@@ -10,7 +10,7 @@ TOP=['.gitignore','.gitattributes','LICENSE','NOTICE','README.md','CONTRIBUTING.
 TOOLS=['copy_licenses.py','export_source.py','build_frozen.py','make_default_voice_pack.py','make_diagnostic_sample.py',
        'fetch_clean_map.py','prepare_clean_map.py','extract_roads.py','build_map_features.py',
        'publish_map_assets.py','prepare_extra_maps.py','extract_extra_roads.py']
-ASSETS=['README.md','maps.json','map-source.json','default_project.json','legacy-road-seed.json',
+ASSETS=['README.md','maps.json','game-coordinates.json','map-source.json','default_project.json','legacy-road-seed.json',
         'ozeti.png','ozeti-features.npz','sample_minimap.png','wardogs-calculator-LICENSE.txt']
 for map_id in ('bakurani','zestafona'):
     ASSETS.extend(f'maps/{map_id}/{name}' for name in ('map.png','features.npz','project.json','source.json','reference-crop.png'))
@@ -21,6 +21,7 @@ def public_files():
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_nav').glob('*.py'))
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_audio').glob('*.py'))
     paths.append(Path('wardogs_audio/windows_speech.ps1'))
+    paths.append(Path('wardogs_nav/windows_ocr.ps1'))
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'wardogs_audio/assets').rglob('*') if p.is_file())
     paths.extend(p.relative_to(ROOT) for p in (ROOT/'tests').glob('test_*.py'))
     # Community submissions are reviewed data and documentation, not executables.

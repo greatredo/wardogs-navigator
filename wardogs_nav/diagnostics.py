@@ -33,6 +33,22 @@ def run_selftest(output):
         report['checks']['image_localization']=True
         view=locator.locate_map(sample)
         report['checks']['bigmap_localization']=bool(view.valid and np.linalg.norm(view.matrix@[sample.shape[1]/2,sample.shape[0]/2,1]-[fix.x,fix.y])<2)
+        from .coordinates import game_to_map,map_to_game
+        from .coordinate_reader import CoordinateReader
+        coordinate=game_to_map('bakurani',[87.02,33.58])
+        report['checks']['game_coordinate_assets']=bool(np.linalg.norm(np.asarray(coordinate)-[1181.98,1783.46])<.1
+            and np.allclose(map_to_game('bakurani',coordinate),[87.02,33.58]))
+        labels=np.full((400,600,3),25,np.uint8)
+        cv2.line(labels,(200,5),(200,395),(145,145,145));cv2.line(labels,(5,240),(595,240),(145,145,145))
+        cv2.putText(labels,'y33.58',(210,150),cv2.FONT_HERSHEY_SIMPLEX,.65,(255,255,255),1,cv2.LINE_AA)
+        cv2.putText(labels,'x87.18',(250,232),cv2.FONT_HERSHEY_SIMPLEX,.65,(255,255,255),1,cv2.LINE_AA)
+        reader=CoordinateReader()
+        try:
+            reader.read(labels,'bakurani',0);coordinate_fix=reader.read(labels,'bakurani',0)
+            report['checks']['native_coordinate_ocr']=bool(coordinate_fix and coordinate_fix.game==[87.18,33.58]
+                and coordinate_fix.matches((200,240),dict(left=0,top=0)))
+            report['coordinate_ocr_error']=reader.error
+        finally:reader.cleanup()
         terrain=read_image(map_asset('ozeti','image'))
         ambiguous=cv2.resize(terrain[1177:1313,437:573],(340,340))
         ambiguous[148:193,148:193]=(70,70,70)
@@ -55,6 +71,15 @@ def run_selftest(output):
         window.grab().save(str(output.with_suffix('.png')))
         report['checks']['gui']=True
         window.worker.capture=True;window.on_fix(fix,sample,True)
+        window.start_recording()
+        report['checks']['recording_hud_active']=window.hud.data['text']=='路线记录中'
+        window.hud.grab().save(str(output.with_name(output.stem+'-recording-hud.png')))
+        window.finish_recording()
+        report['checks']['recording_hud_finished']='记录结束' in window.hud.data['text']
+        deadline=time.monotonic()+2.2
+        while time.monotonic()<deadline:app.processEvents();time.sleep(.01)
+        report['checks']['hud_notice_returns_to_standby']=window.hud.data['text']=='待机中'
+        window.worker.capture=True;window.on_fix(fix,sample,True)
         window.fix_time=time.monotonic()-3;window.check_stale()
         report['checks']['stale_fix_clears_ui']=(not window.fix.valid and not window.fix_live
             and window.map.player_item is None and '100%' not in window.fix_label.text())
@@ -67,7 +92,7 @@ def run_selftest(output):
             and not window.failure_diagnostic[1]['fix']['valid'])
         window.toggle_capture();window.toggle_capture();window.on_fix(fix,sample,True)
         report['checks']['capture_restart_restores_hud_title']=(window.fix_live
-            and window.hud.data['text']=='等待导航' and window.hud.localization_text==window.fix_label.text())
+            and window.hud.data['text']=='待机中' and window.hud.localization_text==window.fix_label.text())
         window.worker.capture=False
         window.arrival_radius.setValue(180)
         report['checks']['arrival_radius_control']=window.settings['arrival_m']==180
@@ -255,6 +280,12 @@ def run_selftest(output):
             report['checks']['bigmap_mouse_passthrough']=bool(window.big_overlay.windowFlags()&Qt.WindowTransparentForInput)
             report['checks']['bigmap_capture_exclusion_or_mask']=bool(window.big_overlay.capture_excluded or (window.worker.map_mask is not None and window.worker.map_mask.any()))
             window.big_overlay.grab().save(str(output.with_name(output.stem+'-bigmap.png')))
+            plain=window.big_overlay.surface.copy()
+            window.big_roads.setChecked(True);window.big_overlay.update_map(big,window.project)
+            report['checks']['bigmap_road_network_toggle']=(window.settings['bigmap']['show_roads'] and window.big_overlay.surface!=plain)
+            window.big_overlay.grab().save(str(output.with_name(output.stem+'-bigmap-roads.png')))
+            window.big_roads.setChecked(False);window.big_overlay.update_map(big,window.project)
+            report['checks']['bigmap_road_network_hidden_again']=window.big_overlay.surface==plain
             window.big_overlay.hide()
             report['checks']['physical_cursor_api']=physical_cursor() is not None
             statuses=[];triggered=[]

@@ -2,17 +2,18 @@
 import time
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QCheckBox,QFormLayout,QKeySequenceEdit
+from PySide6.QtWidgets import QCheckBox,QFormLayout,QKeySequenceEdit,QLineEdit,QComboBox
 from . import hotkeys
 from .bigmap import BigMapOverlay
 from .dialogs import number
 from .maps import map_info
 from .routing import nearest_on_route
+from .coordinates import parse_coordinates,format_coordinates,game_to_map,map_to_game
 
 
 class GameMapController:
     def init_game_map(self):
-        self.big_view=None;self.game_window=0;self.big_resume=None
+        self.big_view=None;self.coordinate_view=None;self.game_window=0;self.big_resume=None
         self.big_tracking=False
         self.big_message='大地图 · 快捷键就绪';self.big_message_until=0
         self.big_overlay=BigMapOverlay(self.settings['bigmap'])
@@ -26,6 +27,31 @@ class GameMapController:
         self.worker.map_result.connect(self.on_big_map)
         self.worker.action_failed.connect(self.map_feedback)
 
+    def build_coordinate_input(self,layout):
+        group=self.group('游戏坐标',layout)
+        group.addWidget(self.text('按顶部选择的地图换算。可输入或粘贴 x87.18, y33.31，也支持 87.18/33.31。',True))
+        self.coordinate_input=QLineEdit();self.coordinate_input.setPlaceholderText('x87.18, y33.31');group.addWidget(self.coordinate_input)
+        self.coordinate_action=QComboBox()
+        for action,label in [('destination','设为目的地'),('start','设为起始点'),('waypoint','添加途经点'),('navigate','一键新导航')]:
+            self.coordinate_action.addItem(label,action)
+        group.addWidget(self.row(self.coordinate_action,self.button('应用坐标',self.apply_coordinates)))
+        self.coordinate_input.returnPressed.connect(self.apply_coordinates)
+        self.coordinate_feedback=self.text('目的地可以提前保存；回到小地图后获取车辆位置并导航。',True);group.addWidget(self.coordinate_feedback)
+
+    def apply_coordinates(self):
+        try:
+            game=parse_coordinates(self.coordinate_input.text())
+            point=game_to_map(self.project['map'],game)
+        except ValueError as error:
+            self.coordinate_feedback.setText(str(error));return
+        action=self.coordinate_action.currentData()
+        self.apply_map_action(action,point)
+        self.coordinate_feedback.setText(f'{map_info(self.project["map"])["name"]} · {format_coordinates(game)} · 已应用：{self.coordinate_action.currentText()}')
+        if action=='navigate':self.start_navigation()
+
+    def show_map_coordinates(self,x,y):
+        self.coordinate_label.setText('游戏坐标  '+format_coordinates(map_to_game(self.project['map'],[x,y])))
+
     def build_game_map_settings(self,layout):
         group=self.group('局内大地图',layout)
         group.addWidget(self.text('先在游戏中打开大地图，再单独框选地图画面。小地图定位正常时，大地图识别和鼠标读取全部停止。',True))
@@ -33,6 +59,13 @@ class GameMapController:
         self.big_enabled=QCheckBox('启用大地图识别、叠加与快捷键')
         self.big_enabled.setChecked(self.settings['bigmap']['enabled'])
         self.big_enabled.toggled.connect(lambda v:self.big_setting('enabled',v));group.addWidget(self.big_enabled)
+        self.big_roads=QCheckBox('在大地图上显示路网')
+        self.big_roads.setChecked(self.settings['bigmap']['show_roads'])
+        self.big_roads.toggled.connect(lambda v:self.big_setting('show_roads',v));group.addWidget(self.big_roads)
+        self.coordinate_enabled=QCheckBox('地形未匹配时读取十字坐标')
+        self.coordinate_enabled.setChecked(self.settings['bigmap']['coordinates'])
+        self.coordinate_enabled.toggled.connect(lambda v:self.big_setting('coordinates',v));group.addWidget(self.coordinate_enabled)
+        group.addWidget(self.text('框选范围需包含地图内的十字线及 x/y 文字。坐标模式可设置目标；路线叠加等待地形匹配恢复。操作时让十字停稳，按下快捷键后保持位置直至核准。',True))
         form=QFormLayout();self.big_fields={}
         for key,label,lo,hi in [('left','左边 X',-30000,30000),('top','上边 Y',-30000,30000),('width','宽度',60,5000),('height','高度',60,5000)]:
             field=number(self.settings['bigmap_capture'][key],lo,hi)
@@ -70,7 +103,7 @@ class GameMapController:
 
     def big_setting(self,key,value):
         self.settings['bigmap'][key]=value
-        if key=='enabled':self.reset_game_map();self.worker.reset_view()
+        if key in ('enabled','coordinates'):self.reset_game_map();self.worker.reset_view()
         self.save_settings();self.update_big_overlay()
 
     def big_capture_setting(self,key,value):
@@ -81,7 +114,7 @@ class GameMapController:
         self.hide_game_map();self.game_window=0
 
     def hide_game_map(self):
-        self.big_view=None;self.big_tracking=False;self.cursor_timer.stop();self.global_hotkeys.set_active(False);self.big_overlay.hide()
+        self.big_view=None;self.coordinate_view=None;self.big_tracking=False;self.cursor_timer.stop();self.global_hotkeys.set_active(False);self.big_overlay.hide()
 
     def big_view_available(self):
         return (self.worker.capture and self.settings['bigmap']['enabled'] and self.big_view is not None
@@ -92,11 +125,22 @@ class GameMapController:
     def big_view_fresh(self):
         return self.big_view_available() and self.big_tracking and time.monotonic()-self.big_view.captured_at<2.5
 
+    def coordinate_available(self):
+        view=self.coordinate_view
+        return (self.worker.capture and self.settings['bigmap']['enabled'] and self.settings['bigmap']['coordinates']
+            and view is not None and view.coordinate is not None and view.session==self.worker.session
+            and (view.map_id,view.generation)==self.worker.context and view.region==self.settings['bigmap_capture']
+            and time.monotonic()-view.captured_at<2.5)
+
+    def game_view_available(self):
+        return self.big_view_available() or self.coordinate_available()
+
     def game_map_active(self):
-        return (self.big_view_available() and self.worker.mode!='mini' and self.game_window
+        return (self.game_view_available() and self.worker.mode!='mini' and self.game_window
                 and hotkeys.foreground_window()==self.game_window)
 
     def big_localization(self):
+        if self.coordinate_available():return '大地图坐标 · '+format_coordinates(self.coordinate_view.coordinate.game)
         return f'大地图识别 · {self.big_view.confidence:.0%}' if self.big_view_available() else '尚未识别大地图'
 
     def on_big_map(self,view,frame,actions=None):
@@ -108,17 +152,20 @@ class GameMapController:
             self.hide_game_map();return
         if self.game_window and view.foreground!=self.game_window:
             self.hide_game_map();return
-        if not view.valid or time.monotonic()-view.captured_at>=2.5:
+        if not (view.valid or view.coordinate) or time.monotonic()-view.captured_at>=2.5:
             self.big_tracking=False
             if actions:self.worker.retry_actions(actions,view.foreground)
             self.invalidate_fix(view.reason);self.update_big_overlay();return
-        self.game_window=view.foreground;self.worker.target_window=view.foreground;self.big_view=view
+        self.game_window=view.foreground;self.worker.target_window=view.foreground
+        self.big_view=view if view.valid else None
+        self.coordinate_view=view if not view.valid and view.coordinate else None
+        if self.coordinate_view:self.big_overlay.hide()
         self.big_tracking=True
         self.fix_live=False;self.minimap_overlay.hide();self.navigator.lost();self.tts.stop()
         self.disconnect_recording()
         self.set_localization(self.big_localization())
         self.set_hud({'state':'bigmap','text':'大地图操作中'})
-        self.big_status.setText(f'{view.reason} · {view.inliers} 个匹配点')
+        self.big_status.setText(f'{view.reason} · {view.inliers} 个匹配点' if view.valid else self.big_localization()+' · 快捷键可用')
         self.global_hotkeys.set_active(True)
         self.cursor_timer.start()
         self.update_big_overlay()
@@ -126,7 +173,11 @@ class GameMapController:
             for action in actions:
                 if action[0]!=view.session or action[3]!=view.foreground or time.monotonic()-action[4]>=6:
                     self.map_feedback('操作超时或窗口已切换，请重试');continue
-                point=self.valid_map_point(view.screen_to_map(action[2]))
+                if view.valid:point=self.valid_map_point(view.screen_to_map(action[2]))
+                elif view.coordinate.matches(action[2],view.region):point=self.valid_map_point(view.coordinate.point)
+                else:
+                    self.worker.retry_actions([action],view.foreground)
+                    self.map_feedback('请保持十字位置，等待坐标核准');continue
                 if point is not None:self.apply_map_action(action[1],point)
                 else:self.map_feedback('鼠标不在有效地图范围内')
 
@@ -138,11 +189,13 @@ class GameMapController:
     def poll_map_cursor(self):
         if not self.game_map_active():
             self.hide_game_map();return
+        if self.coordinate_available():
+            self.big_status.setText(self.big_localization()+' · 快捷键可用');return
         if not self.big_view_fresh():
             self.big_status.setText('等待大地图识别恢复；快捷键会核准新画面后执行');return
         point=hotkeys.physical_cursor()
         mapped=self.valid_map_point(self.big_view.screen_to_map(point)) if point else None
-        if mapped:self.big_status.setText(f'大地图鼠标 {mapped[0]:.1f}, {mapped[1]:.1f} · 快捷键可用')
+        if mapped:self.big_status.setText('大地图鼠标 '+format_coordinates(map_to_game(self.project['map'],mapped))+' · 快捷键可用')
         else:self.big_status.setText('鼠标在大地图区域外')
 
     def on_map_hotkey(self,action):
@@ -152,12 +205,13 @@ class GameMapController:
         if not self.game_map_active():
             self.hotkey_status.setText('收到快捷键，但当前不是前台游戏大地图');return
         point=hotkeys.physical_cursor()
-        if point is None or self.big_view.screen_to_map(point) is None:
+        region=self.settings['bigmap_capture']
+        if point is None or not (region['left']<=point[0]<region['left']+region['width'] and region['top']<=point[1]<region['top']+region['height']):
             self.map_feedback('鼠标不在大地图框选范围内');return
         if self.worker.request_action(action,point,self.game_window):self.map_feedback('正在核准鼠标位置…')
 
     def map_feedback(self,text):
-        self.big_message=text;self.big_message_until=time.monotonic()+5
+        self.big_message=text;self.big_message_until=time.monotonic()+2
         self.big_status.setText(text)
         self.hotkey_status.setText(text)
         self.update_big_overlay()
@@ -190,6 +244,7 @@ class GameMapController:
             self.changed();self.pending_start=True
             message='新路线已规划；关闭大地图后开始播报' if self.route else '目的地已设置；回到小地图后定位并规划'
             if self.project['start'] and not self.route:message='未找到可行路线；请调整目的地或道路规则'
+            self.flash_hud('目标已设置')
             self.map_feedback(message);self.hud.show();return
         if action=='undo':
             if not self.history:self.map_feedback('没有可撤销的标注');return

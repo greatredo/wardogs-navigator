@@ -69,15 +69,17 @@ class RecordingController:
         else:text+='\n自动记录已关闭 · 累计次数保留'
         self.record_status.setText(self.recorder.error or text)
         if hasattr(self,'map'):self.map.update_recording(self.recorder.state['manual'])
+        self.refresh_hud()
 
     def start_recording(self):
-        self.recorder.start();self.update_recording_status();self.save_recording()
+        self.clear_hud_notice();self.recorder.start();self.update_recording_status();self.save_recording();self.hud.show()
         self.notify('开始记录行驶路线；请开启小地图定位，结束后加入路网')
 
     def finish_recording(self):
         self.disconnect_recording()
         count=self.apply_recorded_roads(self.recorder.stop(),'manual')
         self.save_recording();self.update_recording_status()
+        self.flash_hud('记录完成' if count else '记录结束，无新路段')
         self.notify(f'已加入 {count} 条越野道路，可编辑属性或撤销' if count else '记录已结束：没有足够长的新路段，重合部分已跳过')
 
     def toggle_auto_recording(self,enabled):
