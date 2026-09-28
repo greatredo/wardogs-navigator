@@ -11,6 +11,8 @@ from .recording import RoadRecorder,add_recorded_roads
 class RecordingController:
     def init_recording(self):
         self.settings['recording_minimum']=max(1,min(100,int(self.settings['recording_minimum'])))
+        self.settings['recording_snap_distance_m']=max(1.,min(200.,self.settings['recording_snap_distance_m']))
+        if not self.settings['recording_snap']:self.settings['recording_merge_shortest']=False
         self.load_recording()
         self.record_timer=QTimer(self);self.record_timer.setInterval(2000)
         self.record_timer.timeout.connect(self.save_recording);self.record_timer.start()
@@ -37,6 +39,7 @@ class RecordingController:
                 state=None;self.record_load_error=f'记录未读取，原文件保留：{error}'
         self.recorder=RoadRecorder(state,self.project['meters_per_pixel'] or 1)
         self.recorder.set_roads(self.project['roads'])
+        self.update_recording_options()
         if hasattr(self,'record_status'):self.update_recording_status()
 
     def build_recording(self,layout):
@@ -50,7 +53,21 @@ class RecordingController:
         form=QFormLayout();self.record_minimum=number(self.settings['recording_minimum'],1,100)
         self.record_minimum.valueChanged.connect(self.set_recording_minimum)
         form.addRow('最低经过次数',self.record_minimum);group.addLayout(form)
+        self.record_snap=QCheckBox('贴合现有道路')
+        self.record_snap.setChecked(self.settings['recording_snap']);group.addWidget(self.record_snap)
+        snap_form=QFormLayout()
+        self.record_snap_distance=number(self.settings['recording_snap_distance_m'],1,200,1)
+        self.record_snap_distance.setSuffix(' m');snap_form.addRow('贴合平均距离',self.record_snap_distance)
+        group.addLayout(snap_form)
+        self.record_merge=QCheckBox('合并最短路线')
+        self.record_merge.setChecked(self.settings['recording_merge_shortest']);group.addWidget(self.record_merge)
+        self.record_snap.toggled.connect(self.set_recording_snap)
+        self.record_snap_distance.valueChanged.connect(self.set_recording_snap_distance)
+        self.record_merge.toggled.connect(self.set_recording_merge)
+        self.record_snap_distance.setEnabled(self.record_snap.isChecked())
+        self.record_merge.setEnabled(self.record_snap.isChecked())
         group.addWidget(self.button('清空本地图累计次数',self.clear_recording_counts))
+        group.addWidget(self.text('按约 30 米的小段比较平均间距；贴合段沿用原路，偏离段仍建立越野道路。合并开启时逐段保留较短走法，保留原道路属性和路口。只处理后续加入的记录，可撤销。',True))
         self.record_status=self.text('',True);group.addWidget(self.record_status)
         group.addWidget(self.text('只记录实时小地图位置，无需开始导航。新增道路默认为越野，重合段跳过，地面交叉处拆段。停车不计次数，反向也算一次；丢失定位或打开大地图时断开，恢复后继续。',True))
         self.update_recording_status()
@@ -80,7 +97,7 @@ class RecordingController:
         count=self.apply_recorded_roads(self.recorder.stop(),'manual')
         self.save_recording();self.update_recording_status()
         self.flash_hud('记录完成' if count else '记录结束，无新路段')
-        self.notify(f'已加入 {count} 条越野道路，可编辑属性或撤销' if count else '记录已结束：没有足够长的新路段，重合部分已跳过')
+        self.notify(f'已更新 {count} 条道路（含新增或合并），可编辑属性或撤销' if count else '记录已结束：没有新的有效路段，贴合或重合部分已保留原路')
 
     def toggle_auto_recording(self,enabled):
         self.disconnect_recording()
@@ -90,13 +107,31 @@ class RecordingController:
         self.settings['recording_minimum']=int(value);self.save_settings()
         self.promote_recording();self.update_recording_status()
 
+    def update_recording_options(self):
+        self.recorder.merge_shortest=self.settings['recording_snap'] and self.settings['recording_merge_shortest']
+
+    def set_recording_snap(self,enabled):
+        self.settings['recording_snap']=enabled
+        self.record_snap_distance.setEnabled(enabled);self.record_merge.setEnabled(enabled)
+        if not enabled:self.record_merge.setChecked(False)
+        self.update_recording_options();self.save_settings()
+
+    def set_recording_snap_distance(self,value):
+        self.settings['recording_snap_distance_m']=float(value);self.save_settings()
+
+    def set_recording_merge(self,enabled):
+        self.settings['recording_merge_shortest']=bool(enabled and self.settings['recording_snap'])
+        self.update_recording_options();self.save_settings()
+
     def clear_recording_counts(self):
         if QMessageBox.question(self,'清空累计','清空本地图的自动记录累计？已加入路网的道路和手动记录会保留。',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:return
         self.recorder.clear_counts();self.save_recording();self.update_recording_status()
 
     def apply_recorded_roads(self,traces,source):
         if not traces:return 0
-        roads,count=add_recorded_roads(self.project['roads'],traces,self.project['meters_per_pixel'] or 1,source)
+        roads,count=add_recorded_roads(self.project['roads'],traces,self.project['meters_per_pixel'] or 1,source,
+            snap_to_roads=self.settings['recording_snap'],snap_distance_m=self.settings['recording_snap_distance_m'],
+            merge_shortest=self.settings['recording_merge_shortest'])
         if count:
             self.snapshot();self.project['roads']=roads;self.recorder.set_roads(roads)
             # Appending roads must not cancel, reset, or announce the active trip.
@@ -107,9 +142,9 @@ class RecordingController:
         if not self.settings['recording_auto'] or self.record_load_error:return
         ready=self.recorder.ready(self.settings['recording_minimum'])
         if ready:
-            count=self.apply_recorded_roads([u['points'] for u in ready],'auto')
+            count=self.apply_recorded_roads(self.recorder.promotion_traces(ready,self.settings['recording_minimum']),'auto')
             self.recorder.promoted(ready)
-            if count:self.notify(f'自动记录已更新 {count} 条越野道路，可编辑属性或撤销')
+            if count:self.notify(f'自动记录已更新 {count} 条道路，可编辑属性或撤销')
 
     def record_fix(self,fix,now,live):
         if self.record_load_error:return

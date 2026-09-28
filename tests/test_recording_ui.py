@@ -96,3 +96,25 @@ def test_deleting_recorded_node_preserves_manual_edit_from_auto_extension(window
     window.apply_recorded_roads([[[20,10],[30,10]]],'auto')
     assert len(window.project['roads'])==2
     assert window.project['roads'][0]['points']==[[10,10],[20,10]]
+
+
+def test_recording_fit_controls_dependency_persistence_and_undo(window,tmp_path):
+    assert window.record_snap.isChecked() and not window.record_merge.isChecked()
+    window.record_merge.setChecked(True);window.record_snap_distance.setValue(18)
+    assert window.recorder.merge_shortest
+    window.record_snap.setChecked(False)
+    assert not window.record_merge.isEnabled() and not window.record_merge.isChecked()
+    assert not window.record_snap_distance.isEnabled() and not window.recorder.merge_shortest
+    window.record_snap.setChecked(True)
+    assert window.record_merge.isEnabled() and not window.record_merge.isChecked()
+    window.record_merge.setChecked(True)
+    old=[dict(id='original',name='原路',kind='minor',confirmed=True,points=[[0,100],[25,104],[50,100]])]
+    window.project['roads']=deepcopy(old);window.project['meters_per_pixel']=1
+    window.recorder.set_roads(window.project['roads'])
+    assert window.apply_recorded_roads([[[0,100],[50,100]]],'manual')==1
+    assert window.project['roads'][0]['points']!=old[0]['points']
+    window.undo();assert window.project['roads']==old
+    from wardogs_nav.model import load_settings
+    saved=load_settings()
+    assert saved['recording_snap'] and saved['recording_merge_shortest'] and saved['recording_snap_distance_m']==18
+    assert window.switch_map('bakurani') and window.recorder.merge_shortest

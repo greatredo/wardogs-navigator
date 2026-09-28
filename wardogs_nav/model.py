@@ -50,6 +50,7 @@ def default_settings():
             'wrong_way_alert': True,
             'road_tolerance_m': 30.,
             'recording_auto': False, 'recording_minimum': 3,
+            'recording_snap': True, 'recording_snap_distance_m': 30., 'recording_merge_shortest': False,
             'wrc_lead_m': 150., 'wrc_lead_s': 5., 'wrc_chain_m': 60.,
             'main_topmost': False,
             'bigmap': {'enabled': False, 'coordinates': True, 'show_roads': False, 'opacity': .9, 'line_width': 4, 'avoid_radius_m': 50},
